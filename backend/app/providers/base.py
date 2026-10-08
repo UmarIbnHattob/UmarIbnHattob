@@ -49,6 +49,8 @@ def merge_history(messages: list[dict]) -> list[dict]:
     for m in messages:
         if merged and merged[-1]["role"] == m["role"]:
             merged[-1]["content"] += "\n\n" + m["content"]
+            if m.get("image"):
+                merged[-1]["image"] = m["image"]
         else:
-            merged.append({"role": m["role"], "content": m["content"]})
+            merged.append(dict(m))
     return merged

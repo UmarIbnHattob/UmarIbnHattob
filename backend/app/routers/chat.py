@@ -3,6 +3,8 @@
 Tarix butun suhbat bo'yicha yagona: tanlangan model avvalgi barcha xabarlarni
 (boshqa model yozganlarini ham) kontekst sifatida oladi.
 """
+import base64
+import binascii
 import json
 import uuid
 
@@ -59,7 +61,14 @@ def create_conversation(db: Session = Depends(get_db), user: User = Depends(get_
 def list_messages(conv_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     conv = _own_conversation(db, user, conv_id)
     return [
-        MessageOut(id=str(m.id), role=m.role.value, content=m.content, model=m.model, created_at=m.created_at)
+        MessageOut(
+            id=str(m.id),
+            role=m.role.value,
+            content=m.content,
+            model=m.model,
+            has_canvas=bool(m.attachments and m.attachments.get("canvas")),
+            created_at=m.created_at,
+        )
         for m in conv.messages
     ]
 
@@ -86,6 +95,15 @@ async def send_message(
     if model is None:
         raise HTTPException(400, f"Noma'lum model: {body.model}")
 
+    if body.image:
+        if not model["vision"]:
+            raise HTTPException(400, f"{model['label']} rasmni ko'ra olmaydi. Claude yoki Gemini ni tanlang yoki canvasni ilova qilmang.")
+        try:
+            if not base64.b64decode(body.image, validate=True).startswith(b"\x89PNG"):
+                raise ValueError
+        except (binascii.Error, ValueError):
+            raise HTTPException(400, "Canvas rasmi noto'g'ri formatda (PNG kerak).")
+
     # Oqim boshlanishidan OLDIN tekshiramiz: kalit yo'q bo'lsa, oddiy 400 xato qaytadi
     key_row = db.scalar(select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.provider == model["provider"]))
     if key_row is None:
@@ -96,11 +114,21 @@ async def send_message(
         raise HTTPException(500, str(exc))
 
     conv = _own_conversation(db, user, conv_id)
-    db.add(Message(conversation_id=conv.id, role=Role.user, content=body.content))
+    db.add(
+        Message(
+            conversation_id=conv.id,
+            role=Role.user,
+            content=body.content,
+            attachments={"canvas": True} if body.image else None,
+        )
+    )
     if conv.title == "New chat":
         conv.title = body.content.strip().replace("\n", " ")[:60]
     db.commit()
     history = merge_history([{"role": m.role.value, "content": m.content} for m in conv.messages])
+    # Rasm faqat joriy (oxirgi) xabarga biriktiriladi: eski rasmlarni qayta yuborish token sarflaydi
+    if body.image:
+        history[-1]["image"] = body.image
     conv_uuid = conv.id
 
     async def event_stream():

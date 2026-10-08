@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MessageSquare, Image as ImageIcon, PenTool, Settings } from "lucide-react";
+import { MessageSquare, Image as ImageIcon, Settings } from "lucide-react";
 
 const links = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/media", label: "Media Studio", icon: ImageIcon },
-  { href: "/canvas", label: "Canvas", icon: PenTool },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

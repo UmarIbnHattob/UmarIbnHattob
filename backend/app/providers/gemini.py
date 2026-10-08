@@ -12,10 +12,12 @@ async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIt
     url = f"{BASE}/{model}:streamGenerateContent?alt=sse"
     headers = {"x-goog-api-key": api_key}
     # Gemini da assistant roli "model" deb ataladi
-    contents = [
-        {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
-        for m in messages
-    ]
+    contents = []
+    for m in messages:
+        parts = [{"text": m["content"]}]
+        if m.get("image"):
+            parts.insert(0, {"inlineData": {"mimeType": "image/png", "data": m["image"]}})
+        contents.append({"role": "model" if m["role"] == "assistant" else "user", "parts": parts})
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             async with client.stream("POST", url, headers=headers, json={"contents": contents}) as r:

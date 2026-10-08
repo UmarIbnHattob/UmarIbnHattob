@@ -1,9 +1,9 @@
 /** Chat API chaqiruvlari va SSE oqimini o'qish. */
 import { API_URL, apiFetch } from "@/lib/api";
 
-export type ModelInfo = { id: string; label: string; provider: string };
+export type ModelInfo = { id: string; label: string; provider: string; vision: boolean };
 export type Conversation = { id: string; title: string; updated_at: string };
-export type ChatMessage = { id: string; role: "user" | "assistant"; content: string; model: string | null };
+export type ChatMessage = { id: string; role: "user" | "assistant"; content: string; model: string | null; has_canvas?: boolean };
 
 export const getModels = () => apiFetch<ModelInfo[]>("/models");
 export const getConversations = () => apiFetch<Conversation[]>("/conversations");
@@ -17,13 +17,14 @@ export async function streamMessage(
   convId: string,
   content: string,
   model: string,
+  image: string | null,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, model }),
+    body: JSON.stringify({ content, model, image }),
     signal,
   });
   if (!res.ok || !res.body) {

@@ -8,9 +8,17 @@ from app.providers.base import TIMEOUT, ProviderError, friendly_http_error, iter
 URL = "https://api.anthropic.com/v1/messages"
 
 
+def _to_api(m: dict) -> dict:
+    """Canvas rasmi bo'lsa, xabarni [rasm, matn] bloklariga aylantiradi."""
+    if not m.get("image"):
+        return {"role": m["role"], "content": m["content"]}
+    image = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": m["image"]}}
+    return {"role": m["role"], "content": [image, {"type": "text", "text": m["content"]}]}
+
+
 async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIterator[str]:
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    body = {"model": model, "max_tokens": 4096, "stream": True, "messages": messages}
+    body = {"model": model, "max_tokens": 4096, "stream": True, "messages": [_to_api(m) for m in messages]}
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             async with client.stream("POST", URL, headers=headers, json=body) as r:

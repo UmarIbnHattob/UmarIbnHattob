@@ -1,33 +1,70 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Plus, Send, Square, Trash2 } from "lucide-react";
+import { Eye, PanelRightClose, PanelRightOpen, PenTool, Plus, Send, Square, Trash2 } from "lucide-react";
 import { useChat } from "@/hooks/useChat";
+import { useResizable } from "@/hooks/useResizable";
 import Markdown from "@/components/Markdown";
 import ModelSelector from "@/components/ModelSelector";
+import CodePreview from "@/components/CodePreview";
+import type { CanvasHandle } from "@/components/CanvasPanel";
 
-/** To'liq chat oynasi: suhbatlar ro'yxati, xabarlar, model tanlash va kiritish maydoni. */
+// Excalidraw faqat brauzerda ishlaydi va og'ir: kerak bo'lganda yuklanadi
+const CanvasPanel = dynamic(() => import("@/components/CanvasPanel"), {
+  ssr: false,
+  loading: () => <p className="p-6 text-sm text-neutral-500">Canvas yuklanmoqda…</p>,
+});
+
+type Tab = "preview" | "canvas";
+
+/** Split-screen: chap tomonda chat, o'ng tomonda kod ko'rinishi va canvas (o'lchami o'zgaradi). */
 export default function ChatView() {
   const chat = useChat();
+  const { width, containerRef, onMouseDown } = useResizable();
   const [input, setInput] = useState("");
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [tab, setTab] = useState<Tab>("preview");
+  const [canvasOpened, setCanvasOpened] = useState(false);
+  const [attachCanvas, setAttachCanvas] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const canvasHandle = useRef<CanvasHandle | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.messages]);
 
-  function submit() {
+  const currentModel = chat.models.find((m) => m.id === chat.model);
+
+  function openTab(t: Tab) {
+    setTab(t);
+    setPanelOpen(true);
+    if (t === "canvas") setCanvasOpened(true);
+  }
+
+  async function submit() {
     const text = input;
+    if (!text.trim()) return;
+    setNotice(null);
+    let image: string | null = null;
+    if (attachCanvas) {
+      image = (await canvasHandle.current?.exportPng()) ?? null;
+      if (!image) {
+        setNotice("Canvas bo‘sh yoki ochilmagan, shuning uchun rasm ilova qilinmadi.");
+      }
+    }
     setInput("");
-    chat.send(text);
+    chat.send(text, image);
   }
 
   const labelOf = (id: string | null) => chat.models.find((m) => m.id === id)?.label ?? id;
+  const visionWarning = attachCanvas && currentModel && !currentModel.vision;
 
   return (
-    <div className="flex h-full">
-      <div className="flex w-60 flex-col border-r border-neutral-800 p-2">
+    <div ref={containerRef} className="flex h-full">
+      <div className="flex w-56 shrink-0 flex-col border-r border-neutral-800 p-2">
         <button
           onClick={() => chat.select(null)}
           className="mb-2 flex items-center justify-center gap-2 rounded-md border border-neutral-700 py-2 text-sm hover:bg-neutral-800"
@@ -60,7 +97,27 @@ export default function ChatView() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-neutral-800 p-3">
           <ModelSelector models={chat.models} value={chat.model} onChange={chat.setModel} />
-          <span className="text-xs text-neutral-500">Modelni suhbat o‘rtasida ham almashtirishingiz mumkin</span>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() => openTab("preview")}
+              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+            >
+              <Eye size={14} /> Preview
+            </button>
+            <button
+              onClick={() => openTab("canvas")}
+              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+            >
+              <PenTool size={14} /> Canvas
+            </button>
+            <button
+              onClick={() => setPanelOpen((o) => !o)}
+              aria-label="Panelni ochish/yopish"
+              className="rounded p-1 text-neutral-400 hover:bg-neutral-800"
+            >
+              {panelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 space-y-4 overflow-auto p-4">
@@ -70,13 +127,10 @@ export default function ChatView() {
           {chat.messages.map((m) => (
             <div key={m.id} className={m.role === "user" ? "flex justify-end" : ""}>
               <div
-                className={`max-w-[85%] rounded-lg px-4 py-2 ${
-                  m.role === "user" ? "bg-blue-600" : "bg-neutral-800"
-                }`}
+                className={`max-w-[90%] rounded-lg px-4 py-2 ${m.role === "user" ? "bg-blue-600" : "bg-neutral-800"}`}
               >
-                {m.role === "assistant" && (
-                  <div className="mb-1 text-xs text-neutral-400">{labelOf(m.model)}</div>
-                )}
+                {m.role === "assistant" && <div className="mb-1 text-xs text-neutral-400">{labelOf(m.model)}</div>}
+                {m.has_canvas && <div className="mb-1 text-xs text-blue-200">🖼 Canvas rasmi ilova qilindi</div>}
                 {m.role === "user" ? (
                   <p className="whitespace-pre-wrap">{m.content}</p>
                 ) : (
@@ -88,42 +142,75 @@ export default function ChatView() {
           <div ref={bottomRef} />
         </div>
 
-        {chat.error && (
-          <div className="mx-4 mb-2 rounded bg-red-950 p-3 text-sm text-red-300">
-            {chat.error}{" "}
-            {chat.error.includes("Settings") && (
-              <Link href="/settings" className="underline">
-                Settings ga o‘tish
-              </Link>
+        {(chat.error || notice || visionWarning) && (
+          <div className="mx-4 mb-2 space-y-1 rounded bg-red-950 p-3 text-sm text-red-300">
+            {chat.error && (
+              <p>
+                {chat.error}{" "}
+                {chat.error.includes("Settings") && (
+                  <Link href="/settings" className="underline">
+                    Settings ga o‘tish
+                  </Link>
+                )}
+              </p>
             )}
+            {notice && <p>{notice}</p>}
+            {visionWarning && <p>{currentModel?.label} rasmni ko‘ra olmaydi. Claude yoki Gemini ni tanlang.</p>}
           </div>
         )}
 
-        <div className="flex gap-2 border-t border-neutral-800 p-3">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={2}
-            placeholder="Xabar yozing (Enter — yuborish, Shift+Enter — yangi qator)"
-            className="flex-1 resize-none rounded-md border border-neutral-700 bg-neutral-950 p-2 text-sm"
-          />
-          {chat.streaming ? (
-            <button onClick={chat.stop} className="rounded-md bg-neutral-700 px-4" aria-label="To'xtatish">
-              <Square size={16} />
-            </button>
-          ) : (
-            <button onClick={submit} className="rounded-md bg-blue-600 px-4 hover:bg-blue-500" aria-label="Yuborish">
-              <Send size={16} />
-            </button>
-          )}
+        <div className="border-t border-neutral-800 p-3">
+          <label className="mb-2 flex w-fit items-center gap-2 text-xs text-neutral-400">
+            <input type="checkbox" checked={attachCanvas} onChange={(e) => setAttachCanvas(e.target.checked)} />
+            Canvasni AI ga ko‘rsatish (rasm sifatida ilova qilinadi)
+          </label>
+          <div className="flex gap-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              rows={2}
+              placeholder="Xabar yozing (Enter — yuborish, Shift+Enter — yangi qator)"
+              className="flex-1 resize-none rounded-md border border-neutral-700 bg-neutral-950 p-2 text-sm"
+            />
+            {chat.streaming ? (
+              <button onClick={chat.stop} className="rounded-md bg-neutral-700 px-4" aria-label="To'xtatish">
+                <Square size={16} />
+              </button>
+            ) : (
+              <button onClick={submit} className="rounded-md bg-blue-600 px-4 hover:bg-blue-500" aria-label="Yuborish">
+                <Send size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      {panelOpen && (
+        <>
+          <div
+            onMouseDown={onMouseDown}
+            role="separator"
+            aria-orientation="vertical"
+            className="w-1 shrink-0 cursor-col-resize bg-neutral-800 hover:bg-blue-600"
+          />
+          <div style={{ width }} className="relative shrink-0 bg-neutral-950">
+            <div className={`absolute inset-0 ${tab === "preview" ? "" : "invisible pointer-events-none"}`}>
+              <CodePreview messages={chat.messages} streaming={chat.streaming} />
+            </div>
+            {canvasOpened && (
+              <div className={`absolute inset-0 ${tab === "canvas" ? "" : "invisible pointer-events-none"}`}>
+                <CanvasPanel handleRef={canvasHandle} />
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

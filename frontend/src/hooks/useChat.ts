@@ -47,7 +47,7 @@ export function useChat() {
   );
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, image: string | null = null) => {
       if (!text.trim() || streaming || !model) return;
       setError(null);
       setStreaming(true);
@@ -60,7 +60,7 @@ export function useChat() {
         // Foydalanuvchi xabari va bo'sh javob o'rni darhol ko'rinadi
         setMessages((m) => [
           ...m,
-          { id: `u-${Date.now()}`, role: "user", content: text, model: null },
+          { id: `u-${Date.now()}`, role: "user", content: text, model: null, has_canvas: !!image },
           { id: `a-${Date.now()}`, role: "assistant", content: "", model },
         ]);
         abortRef.current = new AbortController();
@@ -68,6 +68,7 @@ export function useChat() {
           id,
           text,
           model,
+          image,
           (delta) =>
             setMessages((m) => {
               const copy = [...m];

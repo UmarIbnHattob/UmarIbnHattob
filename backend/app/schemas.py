@@ -21,6 +21,7 @@ class ModelOut(BaseModel):
     id: str
     label: str
     provider: Provider
+    vision: bool
 
 
 class ConversationOut(BaseModel):
@@ -34,9 +35,12 @@ class MessageOut(BaseModel):
     role: str
     content: str
     model: str | None = None
+    has_canvas: bool = False
     created_at: datetime
 
 
 class SendMessageIn(BaseModel):
     content: str = Field(min_length=1, max_length=50000)
     model: str
+    # Canvas rasmi: base64 PNG (data: prefiksisiz)
+    image: str | None = Field(default=None, max_length=12_000_000)
