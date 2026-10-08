@@ -15,3 +15,28 @@ class ApiKeyOut(BaseModel):
     configured: bool
     last4: str | None = None
     updated_at: datetime | None = None
+
+
+class ModelOut(BaseModel):
+    id: str
+    label: str
+    provider: Provider
+
+
+class ConversationOut(BaseModel):
+    id: str
+    title: str
+    updated_at: datetime
+
+
+class MessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    model: str | None = None
+    created_at: datetime
+
+
+class SendMessageIn(BaseModel):
+    content: str = Field(min_length=1, max_length=50000)
+    model: str
