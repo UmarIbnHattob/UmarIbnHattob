@@ -1,0 +1,59 @@
+# Desktop ilovani Windows, macOS va Linux uchun yig'adi.
+# Ishga tushirish: GitHub > Actions > "Desktop build" > Run workflow (server manzilini kiriting),
+# yoki "desktop-v0.1.0" kabi tag push qiling.
+name: Desktop build
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: "Ilova ulanadigan server manzili (masalan https://omniai.uz)"
+        required: true
+  push:
+    tags: ["desktop-v*"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: desktop } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: --linux }
+          - { os: windows-latest, target: --win }
+          - { os: macos-latest, target: --mac }
+    runs-on: ${{ matrix.os }}
+    defaults: { run: { working-directory: desktop, shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - name: Server manzilini o'rnatish
+        env:
+          APP_URL: ${{ inputs.app_url || vars.OMNIAI_APP_URL }}
+        run: |
+          if [ -z "$APP_URL" ]; then echo "::error::app_url yoki OMNIAI_APP_URL o'zgaruvchisi kerak"; exit 1; fi
+          node -e "const f='package.json',p=require('./'+f);p.omniai.appUrl=process.env.APP_URL;require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
+      - run: npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false" # imzosiz yig'ish (imzo sertifikati keyin qo'shiladi)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omniai-${{ runner.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+          if-no-files-found: error

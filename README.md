@@ -62,3 +62,37 @@ Yangilash: `git pull && ./deploy/deploy.sh`.
 - `.env.prod` ni **zaxiralang**: unda `ENCRYPTION_KEY` bor — yo'qolsa, foydalanuvchilarning API kalitlari o'qilmaydi.
 - Bazani zaxiralash: `docker compose -f docker-compose.prod.yml exec db pg_dump -U omniai omniai > backup.sql`
 - Birinchi bo'lib o'zingiz ro'yxatdan o'ting; keyin kerak bo'lsa `ALLOW_REGISTRATION=false`.
+
+## API kalitlar: kim to'laydi?
+
+Claude Pro/Max kabi **obunalarni boshqa ilovaga ulab bo'lmaydi**: Anthropic uchinchi tomon ilovalariga
+claude.ai login yoki obuna limitlarini taklif qilishni ruxsatsiz taqiqlaydi. Ilova faqat API kalit bilan ishlaydi.
+Ikki rejim bor (birga ishlaydi):
+
+1. **O'z kaliti (BYOK)** — foydalanuvchi Settings sahifasida o'z kalitini kiritadi va o'zi to'laydi.
+2. **Platforma kaliti** — siz `.env.prod` da `PLATFORM_*_KEY` ni to'ldirasiz; kaliti yo'q foydalanuvchilar
+   oyiga `FREE_MONTHLY_REQUESTS` ta so'rovni bepul ishlatadi (Settings da progress ko'rinadi).
+   Pullik tariflar (Payme/Click) keyingi bosqichda shu limit ustiga quriladi.
+
+## Desktop ilova va Agent rejimi
+
+`desktop/` — Electron ilova. U veb-ilovani ochadi va **Agent** sahifasiga kompyuterdagi papka bilan ishlash
+imkonini beradi: AI fayllarni ko'radi, o'qiydi, qidiradi, yozadi va buyruq ishga tushiradi.
+
+- Papka faqat **mahalliy dialog** orqali tanlanadi; AI undan tashqariga chiqa olmaydi (`../`, symlink bloklangan).
+- Har bir yozish va buyruq uchun **kompyuterning o'z oynasida** ruxsat so'raladi (veb-sahifa buni chetlab o'ta olmaydi).
+
+```bash
+cd desktop
+npm install
+OMNIAI_URL=http://localhost:3000 npm start   # ishlab chiqishda
+npm test                                     # fayl asboblari xavfsizlik testlari
+```
+
+O'rnatish fayllari (Windows `.exe`, macOS `.dmg`, Linux `.AppImage/.deb`): GitHub > Actions > **Desktop build** >
+Run workflow (server manzilini kiriting). Tayyor fayllar workflow artefaktlarida bo'ladi.
+
+## Ovozli buyruqlar
+
+Chat va Agent'da mikrofon tugmasi: gapiring, to'xtating — matn kiritish maydoniga tushadi (o'zbek, rus, ingliz).
+Ovoz brauzerda 16 kHz WAV ga aylantiriladi va Gemini orqali matnga o'giriladi (Gemini kaliti yoki platforma kaliti kerak).

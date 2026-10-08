@@ -15,6 +15,8 @@ class ApiKeyOut(BaseModel):
     configured: bool
     last4: str | None = None
     updated_at: datetime | None = None
+    # O'z kaliti bo'lmasa ham platforma kaliti orqali ishlay oladimi
+    platform_available: bool = False
 
 
 class ModelOut(BaseModel):
@@ -44,3 +46,10 @@ class SendMessageIn(BaseModel):
     model: str
     # Canvas rasmi: base64 PNG (data: prefiksisiz)
     image: str | None = Field(default=None, max_length=12_000_000)
+
+
+class UsageOut(BaseModel):
+    month: str
+    used: int
+    limit: int
+    platform_providers: list[Provider]

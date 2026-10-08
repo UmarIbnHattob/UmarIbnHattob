@@ -62,3 +62,8 @@ def make_client(email="ali@example.com", password="parol12345") -> TestClient:
 @pytest.fixture
 def client():
     return make_client()
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"

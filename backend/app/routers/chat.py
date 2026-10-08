@@ -15,12 +15,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.crypto import decrypt
 from app.database import SessionLocal, get_db
 from app.deps import get_current_user
-from app.models import ApiKey, Conversation, Message, Role, User
+from app.models import Conversation, Message, Role, User
 from app.providers.base import ProviderError, merge_history, trim_history
 from app.providers.registry import MODELS, STREAMERS, find_model
+from app.quota import resolve_key
 from app.schemas import ConversationOut, MessageOut, ModelOut, SendMessageIn
 
 router = APIRouter(tags=["chat"])
@@ -107,16 +107,9 @@ async def send_message(
         except (binascii.Error, ValueError):
             raise HTTPException(400, "Canvas rasmi noto'g'ri formatda (PNG kerak).")
 
-    # Oqim boshlanishidan OLDIN tekshiramiz: kalit yo'q bo'lsa, oddiy 400 xato qaytadi
-    key_row = db.scalar(select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.provider == model["provider"]))
-    if key_row is None:
-        raise HTTPException(400, f"{model['provider'].value} uchun API kalit kiritilmagan. Settings sahifasiga o'ting.")
-    try:
-        api_key = decrypt(key_row.encrypted_key)
-    except RuntimeError as exc:
-        raise HTTPException(500, str(exc))
-
     conv = _own_conversation(db, user, conv_id)
+    # Oqim boshlanishidan OLDIN: kalit yo'q yoki limit tugagan bo'lsa oddiy 400/429 qaytadi
+    api_key = resolve_key(db, user, model["provider"])
     db.add(
         Message(
             conversation_id=conv.id,

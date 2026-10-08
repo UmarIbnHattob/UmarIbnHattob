@@ -31,6 +31,11 @@ services:
       COOKIE_SECURE: "true"
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      # Ixtiyoriy: o'z kaliti bo'lmagan foydalanuvchilar uchun (oylik limit bilan)
+      PLATFORM_ANTHROPIC_KEY: ${PLATFORM_ANTHROPIC_KEY:-}
+      PLATFORM_DEEPSEEK_KEY: ${PLATFORM_DEEPSEEK_KEY:-}
+      PLATFORM_GEMINI_KEY: ${PLATFORM_GEMINI_KEY:-}
+      FREE_MONTHLY_REQUESTS: ${FREE_MONTHLY_REQUESTS:-100}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s

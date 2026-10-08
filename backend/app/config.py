@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     # Yangi ro'yxatdan o'tishni yopish uchun false qiling
     allow_registration: bool = True
 
+    # Platforma kalitlari (ixtiyoriy): foydalanuvchida o'z kaliti bo'lmasa shular ishlatiladi
+    platform_anthropic_key: str = ""
+    platform_deepseek_key: str = ""
+    platform_gemini_key: str = ""
+    # Platforma kaliti bilan har bir foydalanuvchiga oyiga beriladigan bepul so'rovlar soni
+    free_monthly_requests: int = 100
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

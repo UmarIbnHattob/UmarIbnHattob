@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import auth, chat, health, keys, media
+from app.routers import agent, auth, chat, health, keys, media, voice
 
 app = FastAPI(title="OmniAI Workspace API")
 
@@ -18,6 +18,9 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(keys.router, prefix="/api")
+app.include_router(keys.usage_router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(media.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(agent.router, prefix="/api")
+app.include_router(voice.router, prefix="/api")

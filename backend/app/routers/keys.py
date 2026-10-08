@@ -3,11 +3,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.crypto import encrypt
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import ApiKey, Provider, User
-from app.schemas import ApiKeyIn, ApiKeyOut
+from app.quota import current_month, platform_key, used_this_month
+from app.schemas import ApiKeyIn, ApiKeyOut, UsageOut
 
 router = APIRouter(prefix="/keys", tags=["keys"])
 
@@ -22,6 +24,7 @@ def list_keys(db: Session = Depends(get_db), user: User = Depends(get_current_us
             configured=p in saved,
             last4=saved[p].last4 if p in saved else None,
             updated_at=saved[p].updated_at if p in saved else None,
+            platform_available=bool(platform_key(p)),
         )
         for p in Provider
     ]
@@ -59,3 +62,17 @@ def delete_key(provider: Provider, db: Session = Depends(get_db), user: User = D
         raise HTTPException(status_code=404, detail="Kalit topilmadi")
     db.delete(row)
     db.commit()
+
+
+usage_router = APIRouter(tags=["keys"])
+
+
+@usage_router.get("/usage", response_model=UsageOut)
+def usage(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Platforma kaliti bilan bu oy qancha so'rov ishlatilgani."""
+    return UsageOut(
+        month=current_month(),
+        used=used_this_month(db, user),
+        limit=settings.free_monthly_requests,
+        platform_providers=[p for p in Provider if platform_key(p)],
+    )

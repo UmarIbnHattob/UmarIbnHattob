@@ -23,6 +23,11 @@ ENCRYPTION_KEY=$FERNET
 SECRET_KEY=$(rand 48)
 ALLOW_REGISTRATION=true
 WEB_CONCURRENCY=2
+# Ixtiyoriy platforma kalitlari: to'ldirsangiz, foydalanuvchilar o'z kalitisiz ham ishlaydi
+PLATFORM_ANTHROPIC_KEY=
+PLATFORM_DEEPSEEK_KEY=
+PLATFORM_GEMINI_KEY=
+FREE_MONTHLY_REQUESTS=100
 ENV
   echo "  ✓ Saqlandi. Bu faylni YO'QOTMANG va hech kimga bermang (zaxira nusxa oling)."
 fi

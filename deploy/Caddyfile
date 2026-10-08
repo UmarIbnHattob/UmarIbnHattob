@@ -20,8 +20,8 @@
 		reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000}
 	}
 
-	# Canvas rasmi + JSON uchun yetarli, undan kattasi rad etiladi
+	# Canvas rasmi, ovozli xabar va agent tarixi uchun yetarli; undan kattasi rad etiladi
 	request_body {
-		max_size 20MB
+		max_size 40MB
 	}
 }

@@ -1,11 +1,37 @@
-"""Claude (Anthropic Messages API) — oqimli javob."""
+"""Claude (rasmiy Anthropic Python SDK) — oqimli chat javobi."""
 from collections.abc import AsyncIterator
 
-import httpx
+import anthropic
 
-from app.providers.base import MAX_OUTPUT_TOKENS, TIMEOUT, TRUNCATED_NOTE, ProviderError, friendly_http_error, iter_sse_data
+from app.providers.base import TRUNCATED_NOTE, ProviderError
 
-URL = "https://api.anthropic.com/v1/messages"
+# Claude oqimli javob uchun chegara (SDK tavsiyasi: oqimda katta qiymat xavfsiz)
+CHAT_MAX_TOKENS = 64000
+REFUSAL_NOTE = "\n\n_(Claude bu so'rovga xavfsizlik sababli javob bermadi.)_"
+
+
+def client_for(api_key: str) -> anthropic.AsyncAnthropic:
+    # Vaqt chegarasi: ulanish 10s, umumiy 10 daqiqa (uzoq javoblar uchun); 2 marta qayta urinish (429/5xx)
+    return anthropic.AsyncAnthropic(api_key=api_key, timeout=600.0, max_retries=2)
+
+
+def friendly_sdk_error(exc: Exception) -> ProviderError:
+    """SDK xatolarini foydalanuvchiga tushunarli xabarga aylantiradi."""
+    if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return ProviderError("Claude API kaliti noto'g'ri yoki ruxsat yo'q. Settings sahifasida tekshiring.")
+    if isinstance(exc, anthropic.RateLimitError):
+        return ProviderError("Claude so'rovlar limiti tugadi (429). Birozdan keyin qayta urinib ko'ring.")
+    if isinstance(exc, anthropic.APITimeoutError):
+        return ProviderError("Claude javob bermadi (vaqt tugadi). Qayta urinib ko'ring.")
+    if isinstance(exc, anthropic.APIConnectionError):
+        return ProviderError("Claude bilan ulanib bo'lmadi. Internetni tekshiring.")
+    if isinstance(exc, anthropic.BadRequestError):
+        return ProviderError(f"Claude so'rovni qabul qilmadi: {exc.message[:300]}")
+    if isinstance(exc, anthropic.APIStatusError):
+        if exc.status_code >= 500:
+            return ProviderError(f"Claude serverida xato ({exc.status_code}). Keyinroq urinib ko'ring.")
+        return ProviderError(f"Claude xatosi ({exc.status_code}): {exc.message[:300]}")
+    return ProviderError("Claude bilan kutilmagan xato.")
 
 
 def _to_api(m: dict) -> dict:
@@ -17,25 +43,21 @@ def _to_api(m: dict) -> dict:
 
 
 async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIterator[str]:
-    headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    body = {"model": model, "max_tokens": MAX_OUTPUT_TOKENS, "stream": True, "messages": [_to_api(m) for m in messages]}
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            async with client.stream("POST", URL, headers=headers, json=body) as r:
-                if r.status_code != 200:
-                    raise friendly_http_error(r.status_code, (await r.aread()).decode(errors="ignore"))
-                async for ev in iter_sse_data(r):
-                    if not isinstance(ev, dict):
-                        continue
-                    if ev.get("type") == "content_block_delta":
-                        text = ev.get("delta", {}).get("text")
-                        if text:
-                            yield text
-                    elif ev.get("type") == "message_delta" and ev.get("delta", {}).get("stop_reason") == "max_tokens":
-                        yield TRUNCATED_NOTE
-                    elif ev.get("type") == "error":
-                        raise ProviderError(ev.get("error", {}).get("message", "Claude xatosi"))
-    except httpx.TimeoutException:
-        raise ProviderError("Claude javob bermadi (vaqt tugadi). Qayta urinib ko'ring.")
-    except httpx.HTTPError as exc:
-        raise ProviderError(f"Claude bilan ulanishda xato: {exc.__class__.__name__}")
+        async with client_for(api_key).beta.messages.stream(
+            model=model,
+            max_tokens=CHAT_MAX_TOKENS,
+            messages=[_to_api(m) for m in messages],
+            # Xavfsizlik klassifikatori adashib rad etsa, Anthropic tavsiya qilgan modelda qayta urinadi
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text
+            final = await stream.get_final_message()
+        if final.stop_reason == "max_tokens":
+            yield TRUNCATED_NOTE
+        elif final.stop_reason == "refusal":
+            yield REFUSAL_NOTE
+    except anthropic.APIError as exc:
+        raise friendly_sdk_error(exc)

@@ -10,6 +10,7 @@ import Markdown from "@/components/Markdown";
 import ModelSelector from "@/components/ModelSelector";
 import CodePreview from "@/components/CodePreview";
 import OrbitLogo from "@/components/OrbitLogo";
+import VoiceButton from "@/components/VoiceButton";
 import { colorOf } from "@/lib/providers";
 import type { CanvasHandle } from "@/components/CanvasPanel";
 
@@ -277,6 +278,10 @@ export default function ChatView() {
               rows={2}
               placeholder="Xabar yozing (Enter — yuborish, Shift+Enter — yangi qator)"
               className="flex-1 resize-none rounded-md border border-neutral-700 bg-neutral-950 p-2 text-sm"
+            />
+            <VoiceButton
+              onText={(t) => setInput((prev) => (prev ? `${prev.trimEnd()} ${t}` : t))}
+              onError={setNotice}
             />
             {chat.streaming ? (
               <button onClick={chat.stop} className="rounded-md bg-neutral-700 px-4" aria-label="To'xtatish">

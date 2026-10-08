@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, MessageSquare, Image as ImageIcon, Settings } from "lucide-react";
+import { Bot, LogOut, MessageSquare, Image as ImageIcon, Settings } from "lucide-react";
 import { useAuth } from "@/components/AuthGate";
 import OrbitLogo from "@/components/OrbitLogo";
 
 const links = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/agent", label: "Agent", icon: Bot },
   { href: "/media", label: "Media Studio", icon: ImageIcon },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

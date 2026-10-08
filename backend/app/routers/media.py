@@ -6,12 +6,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.crypto import decrypt
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import ApiKey, MediaItem, Provider, User
+from app.models import MediaItem, Provider, User
 from app.providers import gemini_image
 from app.providers.base import ProviderError
+from app.quota import resolve_key
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -58,13 +58,7 @@ def list_media(db: Session = Depends(get_db), user: User = Depends(get_current_u
 async def create_image(body: ImageIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if body.model not in {m["id"] for m in gemini_image.IMAGE_MODELS}:
         raise HTTPException(400, f"Noma'lum model: {body.model}")
-    key_row = db.scalar(select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.provider == Provider.gemini))
-    if key_row is None:
-        raise HTTPException(400, "gemini uchun API kalit kiritilmagan. Settings sahifasiga o'ting.")
-    try:
-        api_key = decrypt(key_row.encrypted_key)
-    except RuntimeError as exc:
-        raise HTTPException(500, str(exc))
+    api_key = resolve_key(db, user, Provider.gemini)
 
     # Rasm yaratish 1-2 daqiqa olishi mumkin: shu vaqtda baza ulanishini band qilib turmaymiz
     user_id = user.id
