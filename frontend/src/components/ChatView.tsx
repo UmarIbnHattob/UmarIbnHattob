@@ -19,6 +19,25 @@ const CanvasPanel = dynamic(() => import("@/components/CanvasPanel"), {
 
 type Tab = "preview" | "canvas";
 
+/** Model javobi hali boshlanmagan payt: animatsiyali "o'ylayapti" belgisi va o'tgan soniyalar. */
+function Thinking({ label }: { label: string | null | undefined }) {
+  const [sec, setSec] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSec((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="flex items-center gap-2 text-sm text-neutral-300">
+      <span className="flex gap-1">
+        {[0, 150, 300].map((d) => (
+          <span key={d} className="h-2 w-2 animate-bounce rounded-full bg-neutral-400" style={{ animationDelay: `${d}ms` }} />
+        ))}
+      </span>
+      {label} javob tayyorlamoqda… {sec > 0 && <span className="text-neutral-500">{sec}s</span>}
+    </div>
+  );
+}
+
 /** Split-screen: chap tomonda chat, o'ng tomonda kod ko'rinishi va canvas (o'lchami o'zgaradi). */
 export default function ChatView() {
   const chat = useChat();
@@ -31,6 +50,11 @@ export default function ChatView() {
   const [notice, setNotice] = useState<string | null>(null);
   const canvasHandle = useRef<CanvasHandle | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Server so'rovni rad etganda (masalan kalit yo'q) yozilgan matn kiritish maydoniga qaytadi
+  useEffect(() => {
+    if (chat.restoreText) setInput(chat.restoreText);
+  }, [chat.restoreText]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -124,7 +148,10 @@ export default function ChatView() {
           {chat.messages.length === 0 && (
             <p className="mt-20 text-center text-neutral-500">Savol yozing, suhbat shu yerda boshlanadi.</p>
           )}
-          {chat.messages.map((m) => (
+          {chat.messages.map((m, i) => {
+            const isLast = i === chat.messages.length - 1;
+            const live = chat.streaming && isLast && m.role === "assistant";
+            return (
             <div key={m.id} className={m.role === "user" ? "flex justify-end" : ""}>
               <div
                 className={`max-w-[90%] rounded-lg px-4 py-2 ${m.role === "user" ? "bg-blue-600" : "bg-neutral-800"}`}
@@ -134,11 +161,19 @@ export default function ChatView() {
                 {m.role === "user" ? (
                   <p className="whitespace-pre-wrap">{m.content}</p>
                 ) : (
-                  <Markdown>{m.content || "…"}</Markdown>
+                  <>
+                    {m.content ? (
+                      <Markdown highlight={!live}>{m.content}</Markdown>
+                    ) : (
+                      <Thinking label={labelOf(m.model)} />
+                    )}
+                    {live && m.content && <span className="mt-1 inline-block h-4 w-2 animate-pulse bg-neutral-400 align-middle" />}
+                  </>
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
           <div ref={bottomRef} />
         </div>
 

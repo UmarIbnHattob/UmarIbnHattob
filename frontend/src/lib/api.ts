@@ -2,13 +2,32 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
+/** Server javob bergan, lekin so'rov bajarilmagan xato (4xx/5xx). */
+export class RequestError extends Error {}
+
+export const NETWORK_ERROR = "Backend bilan aloqa yo‘q. Server (uvicorn) ishlayotganini tekshiring.";
+
+/** fetch ni chaqiradi; tarmoq xatosini va server `detail` xabarini tushunarli Error ga aylantiradi. */
+export async function request(path: string, init?: RequestInit): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, init);
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    throw new Error(NETWORK_ERROR);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    const detail = typeof data?.detail === "string" ? data.detail : `Server xatosi (${res.status})`;
+    throw new RequestError(detail);
+  }
+  return res;
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await request(path, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
-  if (!res.ok) {
-    throw new Error(`API xatosi: ${res.status} ${res.statusText}`);
-  }
-  return res.json() as Promise<T>;
+  return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
 }

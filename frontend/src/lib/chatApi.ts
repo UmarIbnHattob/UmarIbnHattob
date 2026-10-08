@@ -1,5 +1,5 @@
 /** Chat API chaqiruvlari va SSE oqimini o'qish. */
-import { API_URL, apiFetch } from "@/lib/api";
+import { apiFetch, request } from "@/lib/api";
 
 export type ModelInfo = { id: string; label: string; provider: string; vision: boolean };
 export type Conversation = { id: string; title: string; updated_at: string };
@@ -9,8 +9,7 @@ export const getModels = () => apiFetch<ModelInfo[]>("/models");
 export const getConversations = () => apiFetch<Conversation[]>("/conversations");
 export const createConversation = () => apiFetch<Conversation>("/conversations", { method: "POST" });
 export const getMessages = (id: string) => apiFetch<ChatMessage[]>(`/conversations/${id}/messages`);
-export const deleteConversation = (id: string) =>
-  fetch(`${API_URL}/conversations/${id}`, { method: "DELETE" });
+export const deleteConversation = (id: string) => apiFetch<void>(`/conversations/${id}`, { method: "DELETE" });
 
 /** Javobni bo'lak-bo'lak o'qiydi. Xato bo'lsa Error tashlaydi. */
 export async function streamMessage(
@@ -21,16 +20,14 @@ export async function streamMessage(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(`${API_URL}/conversations/${convId}/messages`, {
+  // Server xatosi (kalit yo'q va h.k.) bo'lsa RequestError tashlanadi: xabar saqlanmagan bo'ladi
+  const res = await request(`/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content, model, image }),
     signal,
   });
-  if (!res.ok || !res.body) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.detail ?? `Server xatosi (${res.status})`);
-  }
+  if (!res.body) throw new Error("Bo'sh javob oqimi");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

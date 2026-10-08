@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import type { ChatMessage } from "@/lib/chatApi";
 import { buildSrcDoc, latestWebCode } from "@/lib/codeBlocks";
 
@@ -14,18 +14,27 @@ export default function CodePreview({ messages, streaming }: { messages: ChatMes
   if (code && code !== lastCode) setLastCode(code);
 
   const shown = code ?? lastCode;
+  const writing = streaming && (
+    <span className="flex items-center gap-1 text-xs text-blue-300">
+      <Loader2 size={12} className="animate-spin" /> AI yozmoqda… tugagach natija yangilanadi
+    </span>
+  );
   if (!shown) {
     return (
-      <p className="p-6 text-center text-sm text-neutral-500">
-        AI HTML/CSS/JS kod yozganda, natija shu yerda avtomatik ko‘rinadi.
-        <br />
-        Masalan: “oddiy kalkulyator sahifasini yoz”.
-      </p>
+      <div className="flex flex-col items-center gap-3 p-6 text-center text-sm text-neutral-500">
+        {writing}
+        <p>
+          AI HTML/CSS/JS kod yozganda, natija shu yerda avtomatik ko‘rinadi.
+          <br />
+          Masalan: “oddiy kalkulyator sahifasini yoz”.
+        </p>
+      </div>
     );
   }
   return (
     <div className="flex h-full flex-col">
-      <div className="flex justify-end border-b border-neutral-800 p-1">
+      <div className="flex items-center justify-between border-b border-neutral-800 p-1">
+        <span className="pl-2">{writing}</span>
         <button
           onClick={() => setReload((n) => n + 1)}
           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800"
