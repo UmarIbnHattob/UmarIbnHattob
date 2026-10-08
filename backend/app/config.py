@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite:///./omniai.db"
+    database_url: str = "postgresql+psycopg://omniai:omniai@localhost:5432/omniai"
     frontend_origin: str = "http://localhost:3000"
     encryption_key: str = ""
 
