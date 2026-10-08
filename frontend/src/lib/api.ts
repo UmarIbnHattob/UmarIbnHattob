@@ -11,10 +11,15 @@ export const NETWORK_ERROR = "Backend bilan aloqa yo‘q. Server (uvicorn) ishla
 export async function request(path: string, init?: RequestInit): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, init);
+    // credentials: "include" — sessiya cookie'si backendga yuboriladi
+    res = await fetch(`${API_URL}${path}`, { credentials: "include", ...init });
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
     throw new Error(NETWORK_ERROR);
+  }
+  if (res.status === 401) {
+    // Sessiya tugagan: AuthGate eshitib, kirish sahifasiga o'tkazadi
+    window.dispatchEvent(new Event("auth-expired"));
   }
   if (!res.ok) {
     const data = await res.json().catch(() => null);

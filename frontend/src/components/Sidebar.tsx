@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MessageSquare, Image as ImageIcon, Settings } from "lucide-react";
+import { LogOut, MessageSquare, Image as ImageIcon, Settings } from "lucide-react";
+import { useAuth } from "@/components/AuthGate";
 
 const links = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
@@ -13,8 +14,9 @@ const links = [
 /** Chap tomondagi asosiy navigatsiya paneli. */
 export default function Sidebar() {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
   return (
-    <aside className="flex w-56 flex-col gap-1 border-r border-neutral-800 bg-neutral-950 p-3">
+    <aside className="flex w-56 shrink-0 flex-col gap-1 border-r border-neutral-800 bg-neutral-950 p-3">
       <div className="mb-4 px-2 text-lg font-semibold">OmniAI Workspace</div>
       {links.map(({ href, label, icon: Icon }) => (
         <Link
@@ -30,6 +32,17 @@ export default function Sidebar() {
           {label}
         </Link>
       ))}
+      <div className="mt-auto border-t border-neutral-800 pt-3">
+        <div className="truncate px-2 text-xs text-neutral-500" title={user.email}>
+          {user.email}
+        </div>
+        <button
+          onClick={logout}
+          className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-white"
+        >
+          <LogOut size={16} /> Chiqish
+        </button>
+      </div>
     </aside>
   );
 }

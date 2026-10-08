@@ -6,6 +6,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://omniai:omniai@localhost:5432/omniai"
     frontend_origin: str = "http://localhost:3000"
     encryption_key: str = ""
+    # Sessiya (JWT) imzolash kaliti. Yaratish: python -c "import secrets; print(secrets.token_urlsafe(48))"
+    secret_key: str = ""
+    session_days: int = 7
+    # HTTPS orqali joylashtirilganda true qiling
+    cookie_secure: bool = False
+    # Yangi ro'yxatdan o'tishni yopish uchun false qiling
+    allow_registration: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

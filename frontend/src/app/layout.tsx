@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
+import AuthGate from "@/components/AuthGate";
 
 export const metadata: Metadata = {
   title: "OmniAI Workspace",
@@ -10,9 +10,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="flex h-screen bg-neutral-900 text-neutral-100">
-        <Sidebar />
-        <main className="min-w-0 flex-1 overflow-auto">{children}</main>
+      <body className="h-screen bg-neutral-900 text-neutral-100">
+        <AuthGate>{children}</AuthGate>
       </body>
     </html>
   );
