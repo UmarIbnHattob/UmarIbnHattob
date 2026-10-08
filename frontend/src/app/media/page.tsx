@@ -14,6 +14,7 @@ export default function MediaPage() {
   const [busy, setBusy] = useState(false);
   const [sec, setSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [freshId, setFreshId] = useState<string | null>(null); // yangi rasm "chiqish" animatsiyasi bilan ko'rinadi
 
   const load = useCallback(async () => {
     try {
@@ -47,7 +48,8 @@ export default function MediaPage() {
     setBusy(true);
     setError(null);
     try {
-      await api.createImage(prompt.trim(), model);
+      const item = await api.createImage(prompt.trim(), model);
+      setFreshId(item.id);
       setPrompt("");
       await load();
     } catch (e) {
@@ -115,15 +117,15 @@ export default function MediaPage() {
       )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {busy && (
-          <div className="flex aspect-square animate-pulse items-center justify-center rounded-lg bg-neutral-800 text-sm text-neutral-400">
-            Rasm yaratilmoqda…
-          </div>
-        )}
+        {busy && <DevelopingCard sec={sec} />}
         {items.map((it) => (
-          <div key={it.id} className="group overflow-hidden rounded-lg border border-neutral-800">
+          <div key={it.id} className="msg-in group overflow-hidden rounded-lg border border-neutral-800">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={api.fileUrl(it.id)} alt={it.prompt} className="aspect-square w-full bg-neutral-900 object-cover" />
+            <img
+              src={api.fileUrl(it.id)}
+              alt={it.prompt}
+              className={`aspect-square w-full bg-neutral-900 object-cover ${it.id === freshId ? "develop" : ""}`}
+            />
             <div className="flex items-start gap-2 p-2">
               <p className="line-clamp-2 flex-1 text-xs text-neutral-400">{it.prompt}</p>
               <a
@@ -147,6 +149,29 @@ export default function MediaPage() {
       {!busy && items.length === 0 && !error && (
         <p className="mt-10 text-center text-sm text-neutral-500">Hali rasm yo‘q. Birinchisini yarating.</p>
       )}
+    </div>
+  );
+}
+
+const DEV_PHRASES = [
+  "Ranglar aralashtirilmoqda…",
+  "Yorug‘lik sozlanmoqda…",
+  "Piksellar o‘z joyini topmoqda…",
+  "Soyalar chizilmoqda…",
+  "Oxirgi silliqlash…",
+];
+
+/** Rasm yaratilayotganda: Polaroid kartochka, skaner nuri va almashib turadigan yozuvlar. */
+function DevelopingCard({ sec }: { sec: number }) {
+  const phrase = DEV_PHRASES[Math.floor(sec / 3) % DEV_PHRASES.length];
+  return (
+    <div className="msg-in rounded-lg bg-neutral-100 p-2 pb-8 shadow-xl" style={{ transform: "rotate(-1.5deg)" }}>
+      <div className="scan relative flex aspect-square items-center justify-center overflow-hidden rounded bg-gradient-to-br from-neutral-800 via-neutral-900 to-black">
+        <span key={phrase} className="fade-swap px-4 text-center text-sm text-neutral-300">
+          {phrase}
+        </span>
+      </div>
+      <p className="mt-2 text-center font-mono text-xs text-neutral-600">{sec}s</p>
     </div>
   );
 }

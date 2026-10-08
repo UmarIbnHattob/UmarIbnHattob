@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from app.providers.base import TIMEOUT, ProviderError, friendly_http_error, iter_sse_data
+from app.providers.base import TIMEOUT, TRUNCATED_NOTE, ProviderError, friendly_http_error, iter_sse_data
 
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -30,6 +30,8 @@ async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIt
                         for part in cand.get("content", {}).get("parts", []):
                             if part.get("text"):
                                 yield part["text"]
+                        if cand.get("finishReason") == "MAX_TOKENS":
+                            yield TRUNCATED_NOTE
     except httpx.TimeoutException:
         raise ProviderError("Gemini javob bermadi (vaqt tugadi). Qayta urinib ko'ring.")
     except httpx.HTTPError as exc:

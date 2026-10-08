@@ -8,6 +8,10 @@ import "highlight.js/styles/github-dark.css";
 
 const REMARK = [remarkGfm];
 const REHYPE_HIGHLIGHT = [rehypeHighlight];
+// AI bergan havolalar yangi oynada ochiladi: chat sahifasidan chiqib ketmaslik uchun
+const COMPONENTS = {
+  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+};
 
 /**
  * Markdown + kod bloklari.
@@ -17,7 +21,7 @@ const REHYPE_HIGHLIGHT = [rehypeHighlight];
 function Markdown({ children, highlight = true }: { children: string; highlight?: boolean }) {
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={highlight ? REHYPE_HIGHLIGHT : []}>
+      <ReactMarkdown components={COMPONENTS} remarkPlugins={REMARK} rehypePlugins={highlight ? REHYPE_HIGHLIGHT : []}>
         {children}
       </ReactMarkdown>
     </div>

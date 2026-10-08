@@ -1,19 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import type { ChatMessage } from "@/lib/chatApi";
-import { buildSrcDoc, latestWebCode } from "@/lib/codeBlocks";
+import { buildSrcDoc, latestWebCode, type WebCode } from "@/lib/codeBlocks";
 
 /** AI yozgan HTML/CSS/JS ni xavfsiz iframe ichida jonli ko'rsatadi. */
 export default function CodePreview({ messages, streaming }: { messages: ChatMessage[]; streaming: boolean }) {
   const [reload, setReload] = useState(0);
-  // Javob yozilayotganda qayta chizmaymiz: faqat yakunlangach yangilanadi
-  const code = useMemo(() => (streaming ? null : latestWebCode(messages)), [messages, streaming]);
-  const [lastCode, setLastCode] = useState<typeof code>(null);
-  if (code && code !== lastCode) setLastCode(code);
-
-  const shown = code ?? lastCode;
+  // Javob yozilayotganda qayta chizmaymiz: oldingi natija turadi, tugagach yangilanadi.
+  // (Boshqa suhbatga o'tilganda esa o'sha suhbatning kodi ko'rsatiladi — eski kod qolib ketmaydi.)
+  const stable = useRef<WebCode | null>(null);
+  const shown = useMemo(() => {
+    if (!streaming) stable.current = latestWebCode(messages);
+    return stable.current;
+  }, [messages, streaming]);
+  const srcDoc = useMemo(() => (shown ? buildSrcDoc(shown) : ""), [shown]);
   const writing = streaming && (
     <span className="flex items-center gap-1 text-xs text-blue-300">
       <Loader2 size={12} className="animate-spin" /> AI yozmoqda… tugagach natija yangilanadi
@@ -47,7 +49,7 @@ export default function CodePreview({ messages, streaming }: { messages: ChatMes
         key={reload}
         title="Live preview"
         sandbox="allow-scripts allow-forms allow-modals"
-        srcDoc={buildSrcDoc(shown)}
+        srcDoc={srcDoc}
         className="min-h-0 flex-1 bg-white"
       />
     </div>

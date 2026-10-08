@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Eye, PanelRightClose, PanelRightOpen, PenTool, Plus, Send, Square, Trash2 } from "lucide-react";
@@ -9,6 +9,8 @@ import { useResizable } from "@/hooks/useResizable";
 import Markdown from "@/components/Markdown";
 import ModelSelector from "@/components/ModelSelector";
 import CodePreview from "@/components/CodePreview";
+import OrbitLogo from "@/components/OrbitLogo";
+import { colorOf } from "@/lib/providers";
 import type { CanvasHandle } from "@/components/CanvasPanel";
 
 // Excalidraw faqat brauzerda ishlaydi va og'ir: kerak bo'lganda yuklanadi
@@ -19,21 +21,35 @@ const CanvasPanel = dynamic(() => import("@/components/CanvasPanel"), {
 
 type Tab = "preview" | "canvas";
 
-/** Model javobi hali boshlanmagan payt: animatsiyali "o'ylayapti" belgisi va o'tgan soniyalar. */
-function Thinking({ label }: { label: string | null | undefined }) {
+/** Model javobi hali boshlanmagan payt: model rangidagi mini-orbita, yaltiroq matn va o'tgan soniyalar. */
+function Thinking({ label, provider }: { label: string | null | undefined; provider?: string }) {
   const [sec, setSec] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setSec((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, []);
+  // Uzoq kutilsa, kayfiyatni ko'taruvchi yozuv almashadi
+  const phrase = sec < 6 ? "javob tayyorlamoqda" : sec < 15 ? "chuqur o‘ylayapti" : "katta javob yozmoqda, biroz sabr";
   return (
-    <div className="flex items-center gap-2 text-sm text-neutral-300">
-      <span className="flex gap-1">
-        {[0, 150, 300].map((d) => (
-          <span key={d} className="h-2 w-2 animate-bounce rounded-full bg-neutral-400" style={{ animationDelay: `${d}ms` }} />
-        ))}
+    <div className="flex items-center gap-3 py-1 text-sm">
+      <OrbitLogo size={22} focus={provider} />
+      <span key={phrase} className="shimmer-text fade-swap">
+        {label} {phrase}…
       </span>
-      {label} javob tayyorlamoqda… {sec > 0 && <span className="text-neutral-500">{sec}s</span>}
+      {sec > 0 && <span className="tabular-nums text-xs text-neutral-500">{sec}s</span>}
+    </div>
+  );
+}
+
+/** Suhbat o'rtasida model almashganda: "A → B · kontekst uzatildi" va bir rangdan ikkinchisiga yuguruvchi nur. */
+function Handoff({ from, to, fromColor, toColor }: { from: string; to: string; fromColor: string; toColor: string }) {
+  return (
+    <div className="msg-in mx-auto flex max-w-md flex-col items-center gap-1.5 py-1">
+      <div className="handoff-line w-full" style={{ ["--from" as string]: fromColor, ["--to" as string]: toColor }} />
+      <span className="text-[11px] text-neutral-500">
+        <span style={{ color: fromColor }}>{from}</span> → <span style={{ color: toColor }}>{to}</span> · kontekst
+        uzatildi
+      </span>
     </div>
   );
 }
@@ -50,14 +66,18 @@ export default function ChatView() {
   const [notice, setNotice] = useState<string | null>(null);
   const canvasHandle = useRef<CanvasHandle | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
+  const [fly, setFly] = useState(0);
 
   // Server so'rovni rad etganda (masalan kalit yo'q) yozilgan matn kiritish maydoniga qaytadi
   useEffect(() => {
     if (chat.restoreText) setInput(chat.restoreText);
   }, [chat.restoreText]);
 
+  // Foydalanuvchi yuqoriga o'qish uchun chiqqan bo'lsa, majburan pastga tortmaymiz
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (nearBottom.current) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [chat.messages]);
 
   const currentModel = chat.models.find((m) => m.id === chat.model);
@@ -70,8 +90,10 @@ export default function ChatView() {
 
   async function submit() {
     const text = input;
-    if (!text.trim()) return;
+    if (!text.trim() || chat.streaming) return; // oqim paytida matn o'chib ketmasin
     setNotice(null);
+    nearBottom.current = true;
+    setFly((n) => n + 1);
     let image: string | null = null;
     if (attachCanvas) {
       image = (await canvasHandle.current?.exportPng()) ?? null;
@@ -84,6 +106,7 @@ export default function ChatView() {
   }
 
   const labelOf = (id: string | null) => chat.models.find((m) => m.id === id)?.label ?? id;
+  const providerOf = (id: string | null) => chat.models.find((m) => m.id === id)?.provider;
   const visionWarning = attachCanvas && currentModel && !currentModel.vision;
 
   return (
@@ -118,8 +141,8 @@ export default function ChatView() {
         </div>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-neutral-800 p-3">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 p-3">
           <ModelSelector models={chat.models} value={chat.model} onChange={chat.setModel} />
           <div className="ml-auto flex items-center gap-1">
             <button
@@ -144,36 +167,77 @@ export default function ChatView() {
           </div>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-auto p-4">
+        <div
+          ref={listRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+          }}
+          className="flex-1 space-y-4 overflow-auto p-4"
+        >
           {chat.messages.length === 0 && (
-            <p className="mt-20 text-center text-neutral-500">Savol yozing, suhbat shu yerda boshlanadi.</p>
-          )}
-          {chat.messages.map((m, i) => {
-            const isLast = i === chat.messages.length - 1;
-            const live = chat.streaming && isLast && m.role === "assistant";
-            return (
-            <div key={m.id} className={m.role === "user" ? "flex justify-end" : ""}>
-              <div
-                className={`max-w-[90%] rounded-lg px-4 py-2 ${m.role === "user" ? "bg-blue-600" : "bg-neutral-800"}`}
-              >
-                {m.role === "assistant" && <div className="mb-1 text-xs text-neutral-400">{labelOf(m.model)}</div>}
-                {m.has_canvas && <div className="mb-1 text-xs text-blue-200">🖼 Canvas rasmi ilova qilindi</div>}
-                {m.role === "user" ? (
-                  <p className="whitespace-pre-wrap">{m.content}</p>
-                ) : (
-                  <>
-                    {m.content ? (
-                      <Markdown highlight={!live}>{m.content}</Markdown>
-                    ) : (
-                      <Thinking label={labelOf(m.model)} />
-                    )}
-                    {live && m.content && <span className="mt-1 inline-block h-4 w-2 animate-pulse bg-neutral-400 align-middle" />}
-                  </>
-                )}
-              </div>
+            <div className="msg-in mt-20 flex flex-col items-center gap-4 text-neutral-500">
+              <OrbitLogo size={64} />
+              <p>Savol yozing — Claude, Deepseek va Gemini bir suhbatda.</p>
             </div>
-            );
-          })}
+          )}
+          {(() => {
+            let lastModel: string | null = null;
+            return chat.messages.map((m, i) => {
+              const isLast = i === chat.messages.length - 1;
+              const live = chat.streaming && isLast && m.role === "assistant";
+              // Oldingi assistant javobining modeli bilan solishtiramiz: almashgan bo'lsa "handoff" chizig'i chiqadi
+              const prevModel = m.role === "assistant" ? lastModel : null;
+              if (m.role === "assistant") lastModel = m.model;
+              const switched = !!prevModel && !!m.model && prevModel !== m.model;
+              return (
+                <Fragment key={m.id}>
+                  {switched && (
+                    <Handoff
+                      from={labelOf(prevModel) ?? ""}
+                      to={labelOf(m.model) ?? ""}
+                      fromColor={colorOf(providerOf(prevModel))}
+                      toColor={colorOf(providerOf(m.model))}
+                    />
+                  )}
+                  <div
+                    className={`msg-in ${m.role === "user" ? "flex justify-end" : ""}`}
+                    style={{ animationDelay: `${Math.min(i * 25, 250)}ms` }}
+                  >
+                    <div
+                      className={`max-w-[90%] rounded-lg px-4 py-2 ${m.role === "user" ? "bg-blue-600" : "bg-neutral-800"}`}
+                      style={
+                        m.role === "assistant"
+                          ? { boxShadow: `inset 3px 0 0 ${colorOf(providerOf(m.model))}` }
+                          : undefined
+                      }
+                    >
+                      {m.role === "assistant" && (
+                        <div className="mb-1 text-xs" style={{ color: colorOf(providerOf(m.model)) }}>
+                          {labelOf(m.model)}
+                        </div>
+                      )}
+                      {m.has_canvas && <div className="mb-1 text-xs text-blue-200">🖼 Canvas rasmi ilova qilindi</div>}
+                      {m.role === "user" ? (
+                        <p className="whitespace-pre-wrap">{m.content}</p>
+                      ) : (
+                        <>
+                          {m.content ? (
+                            <Markdown highlight={!live}>{m.content}</Markdown>
+                          ) : (
+                            <Thinking label={labelOf(m.model)} provider={providerOf(m.model)} />
+                          )}
+                          {live && m.content && (
+                            <span className="mt-1 inline-block h-4 w-2 animate-pulse bg-neutral-400 align-middle" />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </Fragment>
+              );
+            });
+          })()}
           <div ref={bottomRef} />
         </div>
 
@@ -204,7 +268,8 @@ export default function ChatView() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                // isComposing: IME (masalan, emoji/xitoy klaviaturasi) bilan yozayotganda Enter yubormasin
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   submit();
                 }
@@ -218,8 +283,12 @@ export default function ChatView() {
                 <Square size={16} />
               </button>
             ) : (
-              <button onClick={submit} className="rounded-md bg-blue-600 px-4 hover:bg-blue-500" aria-label="Yuborish">
-                <Send size={16} />
+              <button
+                onClick={submit}
+                className="overflow-hidden rounded-md bg-blue-600 px-4 transition-transform hover:bg-blue-500 active:scale-95"
+                aria-label="Yuborish"
+              >
+                <Send key={fly} size={16} className={fly ? "fly" : ""} />
               </button>
             )}
           </div>

@@ -4,6 +4,10 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+# Javob uzunligi chegarasi (Claude/Deepseek uchun)
+MAX_OUTPUT_TOKENS = 8192
+TRUNCATED_NOTE = "\n\n_(Javob uzunlik chegarasida to'xtadi. \"Davom et\" deb yozing.)_"
+
 # Provayderga 60 soniya javob kutamiz, ulanish uchun 10 soniya
 TIMEOUT = httpx.Timeout(connect=10, read=60, write=30, pool=10)
 
@@ -54,3 +58,20 @@ def merge_history(messages: list[dict]) -> list[dict]:
         else:
             merged.append(dict(m))
     return merged
+
+
+def trim_history(messages: list[dict], max_chars: int = 120_000) -> list[dict]:
+    """Juda uzun suhbatda eng eski xabarlarni tashlab yuboradi (model kontekst chegarasidan oshmasin).
+
+    Oxirgi xabar doim qoladi; natija 'user' bilan boshlanadi (Claude talabi).
+    """
+    total, kept = 0, []
+    for m in reversed(messages):
+        total += len(m["content"])
+        if kept and total > max_chars:
+            break
+        kept.append(m)
+    kept.reverse()
+    while len(kept) > 1 and kept[0]["role"] != "user":
+        kept.pop(0)
+    return kept

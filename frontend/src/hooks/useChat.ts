@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "@/lib/chatApi";
 import { RequestError } from "@/lib/api";
 
+const MODEL_KEY = "omniai-model";
+
 /** Chat holati: suhbatlar, xabarlar, tanlangan model va oqimli yuborish. */
 export function useChat() {
   const [models, setModels] = useState<api.ModelInfo[]>([]);
@@ -15,6 +17,8 @@ export function useChat() {
   const [error, setError] = useState<string | null>(null);
   const [restoreText, setRestoreText] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Har bir yuborish/suhbat almashuvi raqamni oshiradi: eski oqimning kechikkan bo'laklari yangi suhbatga yozilmaydi
+  const runRef = useRef(0);
 
   const refreshConversations = useCallback(async () => {
     setConversations(await api.getConversations());
@@ -25,7 +29,14 @@ export function useChat() {
       try {
         const list = await api.getModels();
         setModels(list);
-        setModel(list[0]?.id ?? "");
+        // Oxirgi tanlangan modelni eslab qolamiz (faqat shu brauzerda)
+        let saved: string | null = null;
+        try {
+          saved = localStorage.getItem(MODEL_KEY);
+        } catch {
+          /* localStorage bloklangan bo'lishi mumkin */
+        }
+        setModel(list.some((m) => m.id === saved) ? saved! : (list[0]?.id ?? ""));
         await refreshConversations();
       } catch (e) {
         setError((e as Error).message);
@@ -33,7 +44,20 @@ export function useChat() {
     })();
   }, [refreshConversations]);
 
+  const chooseModel = useCallback((id: string) => {
+    setModel(id);
+    try {
+      localStorage.setItem(MODEL_KEY, id);
+    } catch {
+      /* e'tiborsiz */
+    }
+  }, []);
+
   const select = useCallback(async (id: string | null) => {
+    // Javob yozilayotgan bo'lsa to'xtatamiz: aks holda bo'laklar yangi suhbatga yozilib qoladi.
+    // (Server qisman javobni o'zi saqlaydi.)
+    abortRef.current?.abort();
+    runRef.current++;
     setActiveId(id);
     setError(null);
     try {
@@ -62,6 +86,8 @@ export function useChat() {
       setError(null);
       setRestoreText(null);
       setStreaming(true);
+      const run = ++runRef.current;
+      const current = () => runRef.current === run;
 
       // Kelgan bo'laklarni yig'ib, ~50 ms da bir marta ekranga chiqaramiz:
       // har bo'lakda qayta chizish uzun javobda brauzerni qotiradi
@@ -69,7 +95,7 @@ export function useChat() {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const flush = () => {
         timer = null;
-        if (!pending) return;
+        if (!pending || !current()) return;
         const chunk = pending;
         pending = "";
         setMessages((m) => {
@@ -109,7 +135,7 @@ export function useChat() {
           /* foydalanuvchi to'xtatdi */
         } else if (e instanceof RequestError) {
           // Server so'rovni rad etdi (xabar saqlanmadi): pufakchalarni olib, matnni qaytaramiz
-          setMessages((m) => m.slice(0, -2));
+          if (current()) setMessages((m) => m.slice(0, -2));
           setRestoreText(text);
           setError(e.message);
         } else {
@@ -120,7 +146,7 @@ export function useChat() {
         flush();
         setStreaming(false);
         // Bo'sh qolgan javob o'rnini olib tashlaymiz
-        setMessages((m) =>
+        if (current()) setMessages((m) =>
           m.length && m[m.length - 1].role === "assistant" && !m[m.length - 1].content ? m.slice(0, -1) : m,
         );
         refreshConversations().catch(() => {});
@@ -131,5 +157,5 @@ export function useChat() {
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
-  return { restoreText, models, model, setModel, conversations, activeId, messages, streaming, error, select, remove, send, stop };
+  return { restoreText, models, model, setModel: chooseModel, conversations, activeId, messages, streaming, error, select, remove, send, stop };
 }

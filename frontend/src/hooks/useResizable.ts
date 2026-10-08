@@ -14,6 +14,12 @@ export function useResizable(initial = 520, min = 320, maxRatio = 0.75) {
     document.body.style.userSelect = "none";
   }, []);
 
+  // Boshlang'ich kenglik ekranga moslashadi: kichik ekranda chat siqilib qolmasin
+  useEffect(() => {
+    const w = containerRef.current?.getBoundingClientRect().width;
+    if (w) setWidth(Math.round(Math.max(min, Math.min(initial, w * 0.4))));
+  }, [initial, min]);
+
   useEffect(() => {
     const move = (e: MouseEvent) => {
       if (!dragging.current || !containerRef.current) return;

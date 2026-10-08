@@ -95,5 +95,6 @@ class MediaItem(Base):
     prompt: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(100))
     mime_type: Mapped[str] = mapped_column(String(50))
-    data: Mapped[bytes] = mapped_column(LargeBinary)
+    # deferred: ro'yxat so'rovida rasm baytlari yuklanmaydi, faqat faylni ochganda
+    data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

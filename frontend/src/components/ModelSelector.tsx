@@ -15,7 +15,7 @@ export default function ModelSelector({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm"
+      className="min-w-0 max-w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm"
     >
       {models.map((m) => (
         <option key={m.id} value={m.id}>

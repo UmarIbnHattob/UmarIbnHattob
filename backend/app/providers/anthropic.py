@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from app.providers.base import TIMEOUT, ProviderError, friendly_http_error, iter_sse_data
+from app.providers.base import MAX_OUTPUT_TOKENS, TIMEOUT, TRUNCATED_NOTE, ProviderError, friendly_http_error, iter_sse_data
 
 URL = "https://api.anthropic.com/v1/messages"
 
@@ -18,7 +18,7 @@ def _to_api(m: dict) -> dict:
 
 async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIterator[str]:
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    body = {"model": model, "max_tokens": 4096, "stream": True, "messages": [_to_api(m) for m in messages]}
+    body = {"model": model, "max_tokens": MAX_OUTPUT_TOKENS, "stream": True, "messages": [_to_api(m) for m in messages]}
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             async with client.stream("POST", URL, headers=headers, json=body) as r:
@@ -31,6 +31,8 @@ async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIt
                         text = ev.get("delta", {}).get("text")
                         if text:
                             yield text
+                    elif ev.get("type") == "message_delta" and ev.get("delta", {}).get("stop_reason") == "max_tokens":
+                        yield TRUNCATED_NOTE
                     elif ev.get("type") == "error":
                         raise ProviderError(ev.get("error", {}).get("message", "Claude xatosi"))
     except httpx.TimeoutException:

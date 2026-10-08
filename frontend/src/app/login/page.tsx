@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import * as authApi from "@/lib/authApi";
+import OrbitLogo from "@/components/OrbitLogo";
 
 /** Kirish / ro'yxatdan o'tish formasi. */
 export default function LoginPage() {
@@ -33,10 +34,21 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center p-4">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border border-neutral-800 bg-neutral-950 p-6">
-        <h1 className="text-xl font-semibold">OmniAI Workspace</h1>
-        <p className="text-sm text-neutral-400">{mode === "login" ? "Hisobingizga kiring" : "Yangi hisob yarating"}</p>
+    <div className="relative flex h-screen items-center justify-center overflow-hidden p-4">
+      {/* Fon: model ranglaridagi sekin suzuvchi aurora */}
+      <div className="aurora left-[10%] top-[15%] h-72 w-72 bg-[#e07a5f]" />
+      <div className="aurora bottom-[10%] right-[12%] h-80 w-80 bg-[#4d6bfe]" style={{ animationDelay: "-6s" }} />
+      <div className="aurora left-[45%] top-[50%] h-64 w-64 bg-[#a78bfa]" style={{ animationDelay: "-12s" }} />
+
+      <form
+        onSubmit={submit}
+        className="msg-in relative w-full max-w-sm space-y-4 rounded-2xl border border-white/10 bg-neutral-950/70 p-6 shadow-2xl backdrop-blur-xl"
+      >
+        <div className="flex flex-col items-center gap-3 pb-2">
+          <OrbitLogo size={72} />
+          <h1 className="text-xl font-semibold">OmniAI Workspace</h1>
+        </div>
+        <p className="text-center text-sm text-neutral-400">{mode === "login" ? "Hisobingizga kiring" : "Yangi hisob yarating"}</p>
 
         <input
           type="email"

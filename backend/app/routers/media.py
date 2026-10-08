@@ -66,12 +66,15 @@ async def create_image(body: ImageIn, db: Session = Depends(get_db), user: User 
     except RuntimeError as exc:
         raise HTTPException(500, str(exc))
 
+    # Rasm yaratish 1-2 daqiqa olishi mumkin: shu vaqtda baza ulanishini band qilib turmaymiz
+    user_id = user.id
+    db.close()
     try:
         mime, data = await gemini_image.generate_image(api_key, body.model, body.prompt)
     except ProviderError as exc:
         raise HTTPException(502, str(exc))
 
-    item = MediaItem(user_id=user.id, prompt=body.prompt, model=body.model, mime_type=mime, data=data)
+    item = MediaItem(user_id=user_id, prompt=body.prompt, model=body.model, mime_type=mime, data=data)
     db.add(item)
     db.commit()
     db.refresh(item)

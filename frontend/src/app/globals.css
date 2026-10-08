@@ -37,3 +37,75 @@ body {
 .markdown pre code { background: transparent; padding: 0; }
 .markdown table { border-collapse: collapse; }
 .markdown th, .markdown td { border: 1px solid #404040; padding: 0.3rem 0.6rem; }
+
+/* ===================== Animatsiyalar ===================== */
+
+/* Orbita logotipi */
+.orbit-ring { position: absolute; border-radius: 9999px; border: 1px solid rgb(255 255 255 / 0.08); transition: opacity .4s; }
+.orbit { position: absolute; inset: 0; animation: orbit 3s linear infinite; }
+.orbit > i {
+  position: absolute; top: 0; left: 50%; transform: translate(-50%, -50%);
+  border-radius: 9999px; background: var(--c); box-shadow: 0 0 6px var(--c), 0 0 14px var(--c);
+}
+.orbit-core {
+  position: absolute; border-radius: 9999px;
+  background: radial-gradient(circle at 35% 35%, #fff, #c4b5fd 45%, #6366f1);
+  box-shadow: 0 0 12px #818cf8; animation: core-pulse 2.4s ease-in-out infinite;
+}
+@keyframes orbit { to { transform: rotate(360deg); } }
+@keyframes core-pulse { 50% { transform: scale(1.25); box-shadow: 0 0 20px #a5b4fc; } }
+
+/* Yaltiroq matn ("javob tayyorlamoqda…") */
+.shimmer-text {
+  background: linear-gradient(90deg, #737373 0%, #737373 35%, #fafafa 50%, #737373 65%, #737373 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+@keyframes shimmer { from { background-position: 125% 0; } to { background-position: -125% 0; } }
+
+/* Xabar paydo bo'lishi */
+.msg-in { animation: msg-in .45s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes msg-in { from { opacity: 0; transform: translateY(10px) scale(.98); filter: blur(4px); } }
+
+/* Model almashinuvi: bir rangdan ikkinchisiga yuguruvchi nur */
+.handoff-line { position: relative; height: 2px; border-radius: 9999px; background: linear-gradient(90deg, var(--from), var(--to)); opacity: .5; }
+.handoff-line::after {
+  content: ""; position: absolute; top: -3px; width: 8px; height: 8px; border-radius: 9999px;
+  background: #fff; box-shadow: 0 0 10px #fff, 0 0 18px var(--to); animation: travel 1.6s cubic-bezier(.6, 0, .4, 1) 2 both;
+}
+@keyframes travel { from { left: 0; } to { left: calc(100% - 8px); } }
+
+/* Yuborish: qog'oz samolyot uchib ketadi va qaytib keladi */
+.fly { animation: fly .6s ease-in-out; }
+@keyframes fly {
+  45% { transform: translate(18px, -18px) rotate(12deg); opacity: 0; }
+  46% { transform: translate(-18px, 18px); opacity: 0; }
+}
+
+/* Media Studio: Polaroid kabi "chiqish" */
+.develop { animation: develop 2.6s ease-out both; }
+@keyframes develop {
+  0% { filter: blur(16px) grayscale(1) brightness(1.8) sepia(.5); }
+  55% { filter: blur(3px) grayscale(.35) brightness(1.15) sepia(.2); }
+}
+.scan::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 0%, rgb(167 139 250 / .25) 48%, rgb(255 255 255 / .5) 50%, transparent 52%);
+  animation: scan 2.2s ease-in-out infinite;
+}
+@keyframes scan { from { transform: translateY(-60%); } to { transform: translateY(60%); } }
+.fade-swap { animation: fade-swap .5s ease both; }
+@keyframes fade-swap { from { opacity: 0; transform: translateY(4px); } }
+
+/* Login foni: sekin suzuvchi aurora */
+.aurora { position: absolute; border-radius: 9999px; filter: blur(80px); opacity: .35; animation: drift 18s ease-in-out infinite alternate; }
+@keyframes drift {
+  33% { transform: translate(8vw, -6vh) scale(1.15); }
+  66% { transform: translate(-6vw, 8vh) scale(.9); }
+  100% { transform: translate(4vw, 4vh) scale(1.05); }
+}
+
+/* Foydalanuvchi "harakatni kamaytirish"ni yoqqan bo'lsa — animatsiyalarni o'chiramiz */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}

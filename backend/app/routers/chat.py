@@ -6,9 +6,11 @@ Tarix butun suhbat bo'yicha yagona: tanlangan model avvalgi barcha xabarlarni
 import base64
 import binascii
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -17,11 +19,12 @@ from app.crypto import decrypt
 from app.database import SessionLocal, get_db
 from app.deps import get_current_user
 from app.models import ApiKey, Conversation, Message, Role, User
-from app.providers.base import ProviderError, merge_history
+from app.providers.base import ProviderError, merge_history, trim_history
 from app.providers.registry import MODELS, STREAMERS, find_model
 from app.schemas import ConversationOut, MessageOut, ModelOut, SendMessageIn
 
 router = APIRouter(tags=["chat"])
+log = logging.getLogger(__name__)
 
 
 def _own_conversation(db: Session, user: User, conv_id: uuid.UUID) -> Conversation:
@@ -125,40 +128,54 @@ async def send_message(
     if conv.title == "New chat":
         conv.title = body.content.strip().replace("\n", " ")[:60]
     db.commit()
-    history = merge_history([{"role": m.role.value, "content": m.content} for m in conv.messages])
+    history = trim_history(merge_history([{"role": m.role.value, "content": m.content} for m in conv.messages]))
     # Rasm faqat joriy (oxirgi) xabarga biriktiriladi: eski rasmlarni qayta yuborish token sarflaydi
     if body.image:
         history[-1]["image"] = body.image
     conv_uuid = conv.id
+    model_id = model["id"]
+    # Ulanishni pool'ga qaytaramiz: oqim 1-2 daqiqa davom etishi mumkin,
+    # shu vaqt band tursa ko'p foydalanuvchida ulanishlar tugab qoladi
+    db.close()
+
+    def save_reply(content: str) -> str:
+        with SessionLocal() as s:
+            msg = Message(conversation_id=conv_uuid, role=Role.assistant, content=content, model=model_id)
+            s.add(msg)
+            c = s.get(Conversation, conv_uuid)
+            if c:
+                c.updated_at = func.now()
+            s.commit()
+            return str(msg.id)
 
     async def event_stream():
         parts: list[str] = []
+        saved = False
         try:
-            async for chunk in STREAMERS[model["provider"]](api_key, model["id"], history):
-                parts.append(chunk)
-                yield _sse({"type": "delta", "text": chunk})
-            if not parts:
-                raise ProviderError("Model bo'sh javob qaytardi.")
             error = None
-        except ProviderError as exc:
-            error = str(exc)
-        except Exception:  # kutilmagan xato oqimni sindirmasin
-            error = "Kutilmagan xato yuz berdi."
+            try:
+                async for chunk in STREAMERS[model["provider"]](api_key, model_id, history):
+                    parts.append(chunk)
+                    yield _sse({"type": "delta", "text": chunk})
+                if not parts:
+                    raise ProviderError("Model bo'sh javob qaytardi.")
+            except ProviderError as exc:
+                error = str(exc)
+            except Exception:  # kutilmagan xato oqimni sindirmasin
+                log.exception("Chat oqimida kutilmagan xato")
+                error = "Kutilmagan xato yuz berdi."
 
-        # Qisman javob bo'lsa ham saqlaymiz; so'rov sessiyasi yopilgan bo'lishi mumkin, shuning uchun yangi sessiya
-        message_id = None
-        if parts:
-            with SessionLocal() as s:
-                msg = Message(conversation_id=conv_uuid, role=Role.assistant, content="".join(parts), model=model["id"])
-                s.add(msg)
-                c = s.get(Conversation, conv_uuid)
-                if c:
-                    c.updated_at = func.now()
-                s.commit()
-                message_id = str(msg.id)
-        if error:
-            yield _sse({"type": "error", "message": error})
-        else:
-            yield _sse({"type": "done", "message_id": message_id})
+            # Qisman javob bo'lsa ham saqlaymiz (xato bilan tugagan bo'lsa ham)
+            message_id = await run_in_threadpool(save_reply, "".join(parts)) if parts else None
+            saved = True
+            yield _sse({"type": "error", "message": error} if error else {"type": "done", "message_id": message_id})
+        finally:
+            # Foydalanuvchi "To'xtatish" ni bossa yoki boshqa suhbatga o'tsa, oqim bekor qilinadi:
+            # ekranda ko'rgan qisman javobi yo'qolmasin
+            if parts and not saved:
+                try:
+                    save_reply("".join(parts))
+                except Exception:
+                    log.exception("Qisman javobni saqlab bo'lmadi")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})

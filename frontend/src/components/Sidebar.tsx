@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut, MessageSquare, Image as ImageIcon, Settings } from "lucide-react";
 import { useAuth } from "@/components/AuthGate";
+import OrbitLogo from "@/components/OrbitLogo";
 
 const links = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
@@ -17,7 +18,10 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
   return (
     <aside className="flex w-56 shrink-0 flex-col gap-1 border-r border-neutral-800 bg-neutral-950 p-3">
-      <div className="mb-4 px-2 text-lg font-semibold">OmniAI Workspace</div>
+      <div className="mb-4 flex items-center gap-2 px-2 text-lg font-semibold">
+        <OrbitLogo size={26} />
+        OmniAI
+      </div>
       {links.map(({ href, label, icon: Icon }) => (
         <Link
           key={href}

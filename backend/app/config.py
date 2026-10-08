@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://omniai:omniai@localhost:5432/omniai"
     frontend_origin: str = "http://localhost:3000"
     encryption_key: str = ""
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
     # Sessiya (JWT) imzolash kaliti. Yaratish: python -c "import secrets; print(secrets.token_urlsafe(48))"
     secret_key: str = ""
     session_days: int = 7
