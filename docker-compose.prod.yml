@@ -1,0 +1,69 @@
+# Ishlab chiqarish: docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# (yoki shunchaki: ./deploy/deploy.sh)
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: omniai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env.prod da POSTGRES_PASSWORD kerak}
+      POSTGRES_DB: omniai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omniai -d omniai"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Port tashqariga ochilmaydi: bazaga faqat backend ulanadi
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://omniai:${POSTGRES_PASSWORD}@db:5432/omniai
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?.env.prod da ENCRYPTION_KEY kerak}
+      SECRET_KEY: ${SECRET_KEY:?.env.prod da SECRET_KEY kerak}
+      FRONTEND_ORIGIN: https://${DOMAIN}
+      COOKIE_SECURE: "true"
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?.env.prod da DOMAIN kerak}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
