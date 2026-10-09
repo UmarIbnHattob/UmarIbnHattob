@@ -4,7 +4,8 @@
 
 const { app, BrowserWindow, dialog, ipcMain, net, shell, session } = require("electron");
 const path = require("node:path");
-const { runTool, NEEDS_APPROVAL } = require("./fsTools");
+const { runTool, resolveInside, NEEDS_APPROVAL } = require("./fsTools");
+const { describe } = require("./approval");
 
 // Qaysi serverga ulanish: OMNIAI_URL muhit o'zgaruvchisi > package.json dagi standart
 const APP_URL = process.env.OMNIAI_URL || require("../package.json").omniai.appUrl;
@@ -116,21 +117,6 @@ ipcMain.handle("omni:pickFolder", async (event) => {
   return { name: path.basename(s.root), path: s.root };
 });
 
-function describe(name, args) {
-  if (name === "run_command") return { title: "Buyruqni ishga tushirish", detail: String(args.command ?? "") };
-  if (name === "write_file") {
-    const preview = String(args.content ?? "");
-    return {
-      title: `Faylni yozish: ${args.path}`,
-      detail: preview.length > 1500 ? `${preview.slice(0, 1500)}\n… (${preview.length} belgi)` : preview,
-    };
-  }
-  return {
-    title: `Faylni o'zgartirish: ${args.path}`,
-    detail: `− ${String(args.old_text ?? "").slice(0, 700)}\n\n+ ${String(args.new_text ?? "").slice(0, 700)}`,
-  };
-}
-
 ipcMain.handle("omni:tool", async (event, name, args) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
   const s = state.get(event.sender.id);
@@ -139,13 +125,14 @@ ipcMain.handle("omni:tool", async (event, name, args) => {
 
   // Yozish va buyruqlar uchun ruxsat MAHALLIY oynada so'raladi — veb-sahifa buni chetlab o'ta olmaydi
   if (NEEDS_APPROVAL.has(name) && !s.autoApprove.has(name)) {
-    const { title, detail } = describe(name, args);
+    const { title, detail } = describe(s.root, name, args);
     const win = BrowserWindow.fromWebContents(event.sender);
     const res = await dialog.showMessageBox(win, {
       type: name === "run_command" ? "warning" : "question",
       title: "AI ruxsat so'rayapti",
       message: title,
       detail: `Papka: ${s.root}\n\n${detail}`,
+      noLink: true,
       buttons: ["Ruxsat berish", "Rad etish"],
       defaultId: 1,
       cancelId: 1,
@@ -155,6 +142,24 @@ ipcMain.handle("omni:tool", async (event, name, args) => {
     if (res.checkboxChecked) s.autoApprove.add(name);
   }
   return runTool(s.root, name, args);
+});
+
+// Agent yaratgan faylni odatiy dasturda ochish (masalan HTML -> brauzer).
+// Faqat xavfsiz turlar: skript/dastur fayllari ochilmaydi (ular ishga tushib ketishi mumkin).
+const OPENABLE = new Set([".html", ".htm", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".md", ".txt", ".csv"]);
+
+ipcMain.handle("omni:open", async (event, rel) => {
+  if (!trusted(event)) throw new Error("Ruxsat yo'q");
+  const s = state.get(event.sender.id);
+  if (!s?.root) return { ok: false, error: "Papka tanlanmagan" };
+  try {
+    const abs = resolveInside(s.root, String(rel), { mustExist: true });
+    if (!OPENABLE.has(path.extname(abs).toLowerCase())) return { ok: false, error: "Bu turdagi faylni ochib bo'lmaydi" };
+    const err = await shell.openPath(abs);
+    return err ? { ok: false, error: err } : { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 // Mikrofon: faqat ilova serveriga ruxsat (ovozli buyruqlar uchun)

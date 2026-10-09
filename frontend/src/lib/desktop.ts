@@ -5,6 +5,8 @@ export type OmniDesktop = {
   platform: string;
   pickFolder: () => Promise<{ name: string; path: string } | null>;
   tool: (name: string, args: Record<string, unknown>) => Promise<ToolResult>;
+  /** v2+: faylni odatiy dasturda ochish (eski desktop versiyalarida yo'q) */
+  open?: (relPath: string) => Promise<{ ok: boolean; error?: string }>;
 };
 
 declare global {

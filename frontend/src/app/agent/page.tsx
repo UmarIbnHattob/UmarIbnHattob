@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
+  ExternalLink,
   FilePen,
   FileText,
   FolderOpen,
@@ -43,11 +44,26 @@ function argSummary(name: string, args: Record<string, unknown>) {
   return String(args.path ?? ".");
 }
 
+const OPENABLE = /\.(html?|svg|png|jpe?g|gif|webp|pdf|md|txt|csv)$/i;
+const NEEDS_APPROVAL = new Set(["write_file", "edit_file", "run_command"]);
+
 /** Bitta asbob chaqiruvi: ishlayotganda skaner nuri, tugagach natijani ochib ko'rish mumkin. */
 function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
   const [open, setOpen] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const meta = TOOL_META[item.name] ?? { icon: Terminal, label: item.name };
   const Icon = meta.icon;
+  const filePath = String(item.args.path ?? "");
+  const desktop = getDesktop();
+  const canOpen =
+    item.status === "ok" && (item.name === "write_file" || item.name === "edit_file") && OPENABLE.test(filePath) && !!desktop?.open;
+
+  async function openFile(e: React.MouseEvent) {
+    e.stopPropagation();
+    const r = await desktop!.open!(filePath);
+    setOpenError(r.ok ? null : (r.error ?? "Ochib bo‘lmadi"));
+  }
+
   return (
     <div className={`msg-in overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 ${item.status === "running" ? "scan relative" : ""}`}>
       <button
@@ -57,11 +73,24 @@ function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
         <Icon size={15} className="shrink-0 text-violet-300" />
         <span className="shrink-0 text-neutral-400">{meta.label}</span>
         <code className="min-w-0 flex-1 truncate text-neutral-200">{argSummary(item.name, item.args)}</code>
+        {item.status === "running" && NEEDS_APPROVAL.has(item.name) && (
+          <span className="shimmer-text text-xs">ruxsatingiz kutilmoqda — oynani tekshiring</span>
+        )}
+        {canOpen && (
+          <span
+            role="button"
+            onClick={openFile}
+            className="flex items-center gap-1 rounded-md bg-violet-600 px-2 py-0.5 text-xs text-white hover:bg-violet-500"
+          >
+            <ExternalLink size={12} /> Ochish
+          </span>
+        )}
         {item.status === "running" && <Loader2 size={15} className="animate-spin text-blue-300" />}
         {item.status === "ok" && <CheckCircle2 size={15} className="text-emerald-400" />}
         {item.status === "error" && <XCircle size={15} className="text-red-400" />}
         {item.output && <ChevronRight size={14} className={`text-neutral-500 transition-transform ${open ? "rotate-90" : ""}`} />}
       </button>
+      {openError && <p className="border-t border-neutral-800 px-3 py-1.5 text-xs text-red-400">{openError}</p>}
       {open && item.output && (
         <pre className="max-h-72 overflow-auto border-t border-neutral-800 bg-black/40 p-3 text-xs text-neutral-300">{item.output}</pre>
       )}
