@@ -2,7 +2,7 @@
 // Veb-ilovani oynada ochadi va "Agent" rejimiga kompyuterdagi papka bilan ishlash imkonini beradi.
 "use strict";
 
-const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, shell, session } = require("electron");
 const path = require("node:path");
 const { runTool, NEEDS_APPROVAL } = require("./fsTools");
 
@@ -32,8 +32,14 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  state.set(win.webContents.id, { root: null, autoApprove: new Set() });
-  win.on("closed", () => state.delete(win.webContents.id));
+  // id ni oldindan olamiz: "closed" hodisasida oyna allaqachon yo'q qilingan bo'ladi
+  // (win.webContents ga murojaat "Object has been destroyed" xatosini beradi)
+  const wcId = win.webContents.id;
+  state.set(wcId, { root: null, autoApprove: new Set() });
+  win.on("closed", () => {
+    state.delete(wcId);
+    stopRetry(win);
+  });
 
   // Ilova faqat o'z serverida qoladi; tashqi havolalar odatiy brauzerda ochiladi
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -47,9 +53,44 @@ function createWindow() {
     }
   });
 
-  win.loadURL(APP_URL).catch(() => {
-    dialog.showErrorBox("Ulanib bo'lmadi", `Server ochilmadi: ${APP_URL}\nInternet yoki OMNIAI_URL ni tekshiring.`);
+  // Asosiy sahifa yuklanmasa (server o'chiq, internet yo'q) — kutish sahifasi.
+  // -3 (ERR_ABORTED) xato emas: sahifa o'zi boshqa manzilga o'tganda (masalan /login) shunday bo'ladi.
+  win.webContents.on("did-fail-load", (_e, code, description, _url, isMainFrame) => {
+    if (!isMainFrame || code === -3) return;
+    showOffline(win, description);
   });
+
+  openApp(win);
+}
+
+function openApp(win) {
+  stopRetry(win);
+  // Xatolar did-fail-load da ko'riladi; bu yerda faqat "ushlanmagan promise" bo'lmasin
+  win.loadURL(APP_URL).catch(() => {});
+}
+
+/** Server tayyor bo'lguncha chiroyli kutish sahifasi; har 2 soniyada tekshirib, o'zi ulanadi. */
+const retryTimers = new WeakMap();
+
+function showOffline(win, reason) {
+  if (win.isDestroyed()) return;
+  win.loadFile(path.join(__dirname, "offline.html"), { query: { url: APP_URL, reason: String(reason || "") } }).catch(() => {});
+  if (retryTimers.has(win)) return;
+  const timer = setInterval(async () => {
+    if (win.isDestroyed()) return stopRetry(win);
+    try {
+      const res = await net.fetch(APP_URL, { method: "HEAD", cache: "no-store" });
+      if (res.status < 500) openApp(win);
+    } catch {
+      /* hali ham ishlamayapti */
+    }
+  }, 2000);
+  retryTimers.set(win, timer);
+}
+
+function stopRetry(win) {
+  clearInterval(retryTimers.get(win));
+  retryTimers.delete(win);
 }
 
 /** Faqat ilova serveridan kelgan so'rovlarga javob beramiz (boshqa sahifa ko'prikdan foydalana olmasin). */
