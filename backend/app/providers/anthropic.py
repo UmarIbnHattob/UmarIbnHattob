@@ -42,9 +42,11 @@ def _to_api(m: dict) -> dict:
     return {"role": m["role"], "content": [image, {"type": "text", "text": m["content"]}]}
 
 
-async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIterator[str]:
+async def stream_chat(api_key: str, model: str, messages: list[dict], system: str | None = None) -> AsyncIterator[str]:
+    extra = {"system": system} if system else {}
     try:
         async with client_for(api_key).beta.messages.stream(
+            **extra,
             model=model,
             max_tokens=CHAT_MAX_TOKENS,
             messages=[_to_api(m) for m in messages],

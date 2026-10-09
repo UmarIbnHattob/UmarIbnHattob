@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Download, Loader2, Sparkles, Trash2 } from "lucide-react";
 import * as api from "@/lib/mediaApi";
+import { useI18n, type TKey } from "@/lib/i18n";
 
 /** Media Studio: matn bo'yicha rasm yaratish, galereya, yuklab olish. */
 export default function MediaPage() {
+  const { t } = useI18n();
   const [models, setModels] = useState<api.ImageModel[]>([]);
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -71,14 +73,14 @@ export default function MediaPage() {
   return (
     <div className="mx-auto max-w-5xl p-8">
       <h1 className="text-2xl font-semibold">Media Studio</h1>
-      <p className="mt-1 text-sm text-neutral-400">Matn yozing, AI rasm yaratadi (Gemini kaliti kerak).</p>
+      <p className="mt-1 text-sm text-neutral-400">{t("media.subtitle")}</p>
 
       <div className="mt-6 rounded-lg border border-neutral-800 p-4">
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={3}
-          placeholder="Masalan: quyosh botayotgan paytda tog‘ ko‘li, realistik rasm"
+          placeholder={t("media.placeholder")}
           className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-950 p-3 text-sm"
         />
         <div className="mt-3 flex items-center gap-3">
@@ -96,21 +98,21 @@ export default function MediaPage() {
           <button
             onClick={generate}
             disabled={busy || !prompt.trim()}
-            className="ml-auto flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm hover:bg-blue-500 disabled:opacity-50"
+            className="ml-auto flex items-center gap-2 rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-500 disabled:opacity-50"
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            {busy ? `Yaratilmoqda… ${sec}s` : "Rasm yaratish"}
+            {busy ? `${t("media.generating")} ${sec}s` : t("media.generate")}
           </button>
         </div>
-        <p className="mt-2 text-xs text-neutral-500">Video yaratish keyingi versiyada qo‘shiladi.</p>
+        <p className="mt-2 text-xs text-neutral-500">{t("media.video")}</p>
       </div>
 
       {error && (
-        <div className="mt-4 rounded bg-red-950 p-3 text-sm text-red-300">
+        <div className="mt-4 rounded bg-red-500/10 p-3 text-sm text-red-500">
           {error}{" "}
           {error.includes("Settings") && (
             <Link href="/settings" className="underline">
-              Settings ga o‘tish
+              {t("chat.toSettings")}
             </Link>
           )}
         </div>
@@ -130,14 +132,14 @@ export default function MediaPage() {
               <p className="line-clamp-2 flex-1 text-xs text-neutral-400">{it.prompt}</p>
               <a
                 href={api.fileUrl(it.id, true)}
-                aria-label="Yuklab olish"
-                className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                aria-label={t("media.download")}
+                className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50"
               >
                 <Download size={16} />
               </a>
               <button
                 onClick={() => remove(it.id)}
-                aria-label="O'chirish"
+                aria-label={t("common.delete")}
                 className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-red-400"
               >
                 <Trash2 size={16} />
@@ -147,23 +149,18 @@ export default function MediaPage() {
         ))}
       </div>
       {!busy && items.length === 0 && !error && (
-        <p className="mt-10 text-center text-sm text-neutral-500">Hali rasm yo‘q. Birinchisini yarating.</p>
+        <p className="mt-10 text-center text-sm text-neutral-500">{t("media.empty")}</p>
       )}
     </div>
   );
 }
 
-const DEV_PHRASES = [
-  "Ranglar aralashtirilmoqda…",
-  "Yorug‘lik sozlanmoqda…",
-  "Piksellar o‘z joyini topmoqda…",
-  "Soyalar chizilmoqda…",
-  "Oxirgi silliqlash…",
-];
+const DEV_PHRASES: TKey[] = ["media.dev.1", "media.dev.2", "media.dev.3", "media.dev.4", "media.dev.5"];
 
 /** Rasm yaratilayotganda: Polaroid kartochka, skaner nuri va almashib turadigan yozuvlar. */
 function DevelopingCard({ sec }: { sec: number }) {
-  const phrase = DEV_PHRASES[Math.floor(sec / 3) % DEV_PHRASES.length];
+  const { t } = useI18n();
+  const phrase = t(DEV_PHRASES[Math.floor(sec / 3) % DEV_PHRASES.length]);
   return (
     <div className="msg-in rounded-lg bg-neutral-100 p-2 pb-8 shadow-xl" style={{ transform: "rotate(-1.5deg)" }}>
       <div className="scan relative flex aspect-square items-center justify-center overflow-hidden rounded bg-gradient-to-br from-neutral-800 via-neutral-900 to-black">

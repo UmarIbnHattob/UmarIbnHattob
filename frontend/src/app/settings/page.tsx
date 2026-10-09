@@ -1,133 +1,78 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Trash2, Check } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { Suspense, useEffect } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { BarChart3, Brain, Keyboard, KeyRound, Laptop, Shield, SlidersHorizontal, UserRound } from "lucide-react";
+import { useI18n, type TKey } from "@/lib/i18n";
+import { ToastProvider } from "@/components/settings/ui";
+import GeneralTab from "@/components/settings/GeneralTab";
+import AiTab from "@/components/settings/AiTab";
+import KeysTab from "@/components/settings/KeysTab";
+import UsageTab from "@/components/settings/UsageTab";
+import AccountTab from "@/components/settings/AccountTab";
+import PrivacyTab from "@/components/settings/PrivacyTab";
+import DesktopTab from "@/components/settings/DesktopTab";
+import { ShortcutsList } from "@/components/Modals";
 
-type Provider = "anthropic" | "deepseek" | "gemini";
-type KeyStatus = { provider: Provider; configured: boolean; last4: string | null; platform_available: boolean };
-type Usage = { month: string; used: number; limit: number; platform_providers: Provider[] };
+const TABS = [
+  { id: "general", icon: SlidersHorizontal, label: "settings.tab.general", Comp: GeneralTab },
+  { id: "ai", icon: Brain, label: "settings.tab.ai", Comp: AiTab },
+  { id: "keys", icon: KeyRound, label: "settings.tab.keys", Comp: KeysTab },
+  { id: "usage", icon: BarChart3, label: "settings.tab.usage", Comp: UsageTab },
+  { id: "account", icon: UserRound, label: "settings.tab.account", Comp: AccountTab },
+  { id: "privacy", icon: Shield, label: "settings.tab.privacy", Comp: PrivacyTab },
+  { id: "shortcuts", icon: Keyboard, label: "settings.tab.shortcuts", Comp: ShortcutsList },
+  { id: "desktop", icon: Laptop, label: "settings.tab.desktop", Comp: DesktopTab },
+] as const;
 
-const LABELS: Record<Provider, string> = {
-  anthropic: "Claude (Anthropic)",
-  deepseek: "Deepseek",
-  gemini: "Gemini (Google)",
-};
-
-/** API kalitlarni kiritish/o'chirish sahifasi. Kalit faqat backendga yuboriladi va u yerda shifrlanadi. */
-export default function SettingsPage() {
-  const [keys, setKeys] = useState<KeyStatus[]>([]);
-  const [inputs, setInputs] = useState<Partial<Record<Provider, string>>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [usage, setUsage] = useState<Usage | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setKeys(await apiFetch<KeyStatus[]>("/keys"));
-      setUsage(await apiFetch<Usage>("/usage"));
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-
+function SettingsInner() {
+  const { t } = useI18n();
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const active = TABS.find((x) => x.id === params.get("tab")) ?? TABS[0];
+  const idx = TABS.indexOf(active);
   useEffect(() => {
-    load();
-  }, [load]);
-
-  async function save(provider: Provider) {
-    const key = inputs[provider]?.trim();
-    if (!key) return;
-    try {
-      await apiFetch(`/keys/${provider}`, { method: "PUT", body: JSON.stringify({ key }) });
-      setInputs((s) => ({ ...s, [provider]: "" }));
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  async function remove(provider: Provider) {
-    try {
-      await apiFetch(`/keys/${provider}`, { method: "DELETE" });
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
+    document.title = `${t(active.label as TKey)} — OmniAI`;
+  }, [active, t]);
 
   return (
-    <div className="max-w-2xl p-8">
-      <h1 className="text-2xl font-semibold">Settings</h1>
-      <p className="mt-1 text-sm text-neutral-400">
-        API kalitlar serverda shifrlangan holda saqlanadi.
-      </p>
-      {error && <p className="mt-4 rounded bg-red-950 p-3 text-sm text-red-300">{error}</p>}
-
-      {usage && usage.platform_providers.length > 0 && (
-        <div className="msg-in mt-6 rounded-lg border border-violet-500/30 bg-violet-500/5 p-4">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium">Bepul platforma limiti</span>
-            <span className="tabular-nums text-neutral-400">
-              {usage.used} / {usage.limit} so‘rov · {usage.month}
-            </span>
-          </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-[#4d6bfe] via-[#a78bfa] to-[#e07a5f] transition-all duration-700"
-              style={{ width: `${Math.min(100, (usage.used / Math.max(1, usage.limit)) * 100)}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-neutral-400">
-            O‘z kalitingiz bo‘lmagan provayderlar uchun platforma kaliti ishlatiladi. O‘z kalitingizni kiritsangiz — limit
-            qo‘llanmaydi.
-          </p>
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-6 md:flex-row md:p-8">
+      <nav className="md:w-52 md:shrink-0">
+        <h1 className="mb-4 text-2xl font-semibold">{t("settings.title")}</h1>
+        <div className="relative flex gap-1 overflow-x-auto md:flex-col md:gap-0">
+          {/* Faol bo'lim ko'rsatkichi: bo'limlar orasida silliq suriladi */}
+          <span
+            className="tab-indicator absolute left-0 top-0 hidden h-9 w-full rounded-md bg-neutral-800 md:block"
+            style={{ transform: `translateY(${idx * 40}px)` }}
+          />
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => router.replace(`${pathname}?tab=${tab.id}`, { scroll: false })}
+              className={`relative z-10 flex h-9 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors md:mb-1 ${
+                tab.id === active.id ? "bg-neutral-800 text-neutral-50 md:bg-transparent" : "text-neutral-400 hover:text-neutral-100"
+              }`}
+            >
+              <tab.icon size={16} />
+              {t(tab.label as TKey)}
+            </button>
+          ))}
         </div>
-      )}
-
-      <div className="mt-6 space-y-4">
-        {keys.map(({ provider, configured, last4, platform_available }) => (
-          <div key={provider} className="rounded-lg border border-neutral-800 p-4">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 font-medium">
-                <KeyRound size={16} /> {LABELS[provider]}
-              </span>
-              {!configured && platform_available && (
-                <span className="text-xs text-violet-300">Platforma kaliti ishlatiladi</span>
-              )}
-              {configured && (
-                <span className="flex items-center gap-1 text-sm text-green-400">
-                  <Check size={14} /> •••• {last4}
-                </span>
-              )}
-            </div>
-            <div className="mt-3 flex gap-2">
-              <input
-                type="password"
-                placeholder={configured ? "Yangi kalit bilan almashtirish" : "API kalitni kiriting"}
-                value={inputs[provider] ?? ""}
-                onChange={(e) => setInputs((s) => ({ ...s, [provider]: e.target.value }))}
-                className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm"
-              />
-              <button
-                onClick={() => save(provider)}
-                className="rounded-md bg-blue-600 px-4 text-sm hover:bg-blue-500"
-              >
-                Saqlash
-              </button>
-              {configured && (
-                <button
-                  onClick={() => remove(provider)}
-                  className="rounded-md border border-neutral-700 px-3 hover:bg-neutral-800"
-                  aria-label="O'chirish"
-                >
-                  <Trash2 size={16} />
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+      </nav>
+      <div key={active.id} className="min-w-0 flex-1 md:pt-12">
+        <active.Comp />
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <ToastProvider>
+      <Suspense>
+        <SettingsInner />
+      </Suspense>
+    </ToastProvider>
   );
 }

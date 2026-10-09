@@ -7,7 +7,7 @@ import { RequestError } from "@/lib/api";
 const MODEL_KEY = "omniai-model";
 
 /** Chat holati: suhbatlar, xabarlar, tanlangan model va oqimli yuborish. */
-export function useChat() {
+export function useChat(defaultModel: string | null = null) {
   const [models, setModels] = useState<api.ModelInfo[]>([]);
   const [model, setModel] = useState<string>("");
   const [conversations, setConversations] = useState<api.Conversation[]>([]);
@@ -36,13 +36,15 @@ export function useChat() {
         } catch {
           /* localStorage bloklangan bo'lishi mumkin */
         }
-        setModel(list.some((m) => m.id === saved) ? saved! : (list[0]?.id ?? ""));
+        // Sozlamalardagi standart model > shu brauzerda oxirgi tanlangan > ro'yxatdagi birinchisi
+        const pick = [defaultModel, saved].find((id) => id && list.some((m) => m.id === id));
+        setModel(pick ?? list[0]?.id ?? "");
         await refreshConversations();
       } catch (e) {
         setError((e as Error).message);
       }
     })();
-  }, [refreshConversations]);
+  }, [refreshConversations]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chooseModel = useCallback((id: string) => {
     setModel(id);
@@ -59,13 +61,22 @@ export function useChat() {
     abortRef.current?.abort();
     runRef.current++;
     setActiveId(id);
+    // Yangi suhbat standart model bilan boshlanadi
+    if (id === null && defaultModel) setModel(defaultModel);
     setError(null);
     try {
       setMessages(id ? await api.getMessages(id) : []);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, []);
+  }, [defaultModel]);
+
+  // Ctrl+Shift+O (yoki desktop menyusi) — yangi suhbat
+  useEffect(() => {
+    const onNew = () => select(null);
+    window.addEventListener("omni:new-chat", onNew);
+    return () => window.removeEventListener("omni:new-chat", onNew);
+  }, [select]);
 
   const remove = useCallback(
     async (id: string) => {

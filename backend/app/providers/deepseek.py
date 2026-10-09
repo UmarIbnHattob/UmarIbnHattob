@@ -8,13 +8,14 @@ from app.providers.base import MAX_OUTPUT_TOKENS, TIMEOUT, TRUNCATED_NOTE, Provi
 URL = "https://api.deepseek.com/chat/completions"
 
 
-async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIterator[str]:
+async def stream_chat(api_key: str, model: str, messages: list[dict], system: str | None = None) -> AsyncIterator[str]:
     headers = {"Authorization": f"Bearer {api_key}"}
     body = {
         "model": model,
         "stream": True,
         "max_tokens": MAX_OUTPUT_TOKENS,
-        "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
+        "messages": ([{"role": "system", "content": system}] if system else [])
+        + [{"role": m["role"], "content": m["content"]} for m in messages],
     }
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:

@@ -2,7 +2,7 @@
 // Veb-ilovani oynada ochadi va "Agent" rejimiga kompyuterdagi papka bilan ishlash imkonini beradi.
 "use strict";
 
-const { app, BrowserWindow, dialog, ipcMain, net, shell, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, shell, session } = require("electron");
 const path = require("node:path");
 const { runTool, resolveInside, NEEDS_APPROVAL } = require("./fsTools");
 const { describe } = require("./approval");
@@ -189,6 +189,62 @@ function setupPermissions() {
   });
 }
 
+/**
+ * Ilova menyusi: sahifaga faqat oldindan belgilangan hodisalarni yuboradi (ixtiyoriy kod emas).
+ * Sahifa ularni AuthGate'da eshitadi: omni:navigate, omni:new-chat, omni:modal.
+ */
+function send(event, detail) {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  if (!win || win.isDestroyed()) return;
+  const js = `window.dispatchEvent(new CustomEvent(${JSON.stringify(event)}, { detail: ${JSON.stringify(detail ?? null)} }))`;
+  win.webContents.executeJavaScript(js).catch(() => {});
+}
+
+function buildMenu() {
+  const isMac = process.platform === "darwin";
+  const template = [
+    ...(isMac ? [{ role: "appMenu" }] : []),
+    {
+      label: "OmniAI",
+      submenu: [
+        { label: "Yangi suhbat", accelerator: "CmdOrCtrl+Shift+O", click: () => { send("omni:new-chat"); send("omni:navigate", "/chat"); } },
+        { label: "Agent", accelerator: "CmdOrCtrl+Shift+A", click: () => send("omni:navigate", "/agent") },
+        { label: "Media Studio", click: () => send("omni:navigate", "/media") },
+        { type: "separator" },
+        { label: "Sozlamalar", accelerator: "CmdOrCtrl+,", click: () => send("omni:navigate", "/settings") },
+        { label: "Foydalanish", click: () => send("omni:navigate", "/settings?tab=usage") },
+        { type: "separator" },
+        isMac ? { role: "close", label: "Oynani yopish" } : { role: "quit", label: "Chiqish" },
+      ],
+    },
+    { role: "editMenu", label: "Tahrirlash" },
+    {
+      label: "Ko'rinish",
+      submenu: [
+        { role: "reload", label: "Qayta yuklash" },
+        ...(app.isPackaged ? [] : [{ role: "toggleDevTools", label: "Dasturchi vositalari" }]),
+        { type: "separator" },
+        { role: "zoomIn", label: "Kattalashtirish" },
+        { role: "zoomOut", label: "Kichraytirish" },
+        { role: "resetZoom", label: "Asl o'lcham" },
+        { type: "separator" },
+        { role: "togglefullscreen", label: "To'liq ekran" },
+      ],
+    },
+    { role: "windowMenu", label: "Oyna" },
+    {
+      label: "Yordam",
+      submenu: [
+        { label: "Yordam", click: () => send("omni:modal", "help") },
+        { label: "Tezkor tugmalar", accelerator: "CmdOrCtrl+/", click: () => send("omni:modal", "shortcuts") },
+        { type: "separator" },
+        { label: "OmniAI haqida", click: () => send("omni:modal", "about") },
+      ],
+    },
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
 // Bitta nusxa: ikkinchi marta ochilsa, mavjud oyna oldinga chiqadi
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -202,6 +258,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     setupPermissions();
+    Menu.setApplicationMenu(buildMenu());
     createWindow();
     app.on("activate", () => BrowserWindow.getAllWindows().length === 0 && createWindow());
   });

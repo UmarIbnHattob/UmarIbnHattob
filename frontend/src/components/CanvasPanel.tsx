@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
@@ -22,6 +22,15 @@ function loadSaved() {
 /** Excalidraw doska. `handleRef` orqali AI ga yuboriladigan PNG (base64) olinadi. */
 export default function CanvasPanel({ handleRef }: { handleRef: { current: CanvasHandle | null } }) {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  // Canvas ilova mavzusiga moslashadi (Sozlamalar > Mavzu)
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  useEffect(() => {
+    const read = () => setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
+  }, []);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -52,7 +61,7 @@ export default function CanvasPanel({ handleRef }: { handleRef: { current: Canva
   return (
     <div className="h-full w-full">
       <Excalidraw
-        theme="dark"
+        theme={theme}
         excalidrawAPI={(api) => (apiRef.current = api)}
         initialData={loadSaved()}
         onChange={(elements) => {

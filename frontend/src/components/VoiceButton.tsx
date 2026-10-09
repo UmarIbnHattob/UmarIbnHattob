@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, Mic, Square, X } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { blobToWavBase64 } from "@/lib/wav";
+import { useI18n } from "@/lib/i18n";
 
 const MAX_SECONDS = 120;
 type Phase = "idle" | "recording" | "transcribing";
@@ -13,6 +14,7 @@ type Phase = "idle" | "recording" | "transcribing";
  * Yozish paytida ovoz balandligiga qarab "raqsga tushadigan" rangli to'lqin ko'rinadi.
  */
 export default function VoiceButton({ onText, onError }: { onText: (t: string) => void; onError: (m: string) => void }) {
+  const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>("idle");
   const [sec, setSec] = useState(0);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -85,7 +87,7 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } catch {
-      onError("Mikrofonga ruxsat berilmadi. Brauzer sozlamalarida mikrofonni yoqing.");
+      onError(t("voice.denied"));
       return;
     }
     streamRef.current = stream;
@@ -112,7 +114,7 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
           body: JSON.stringify({ audio, mime: "audio/wav" }),
         });
         if (text) onText(text);
-        else onError("Nutq aniqlanmadi. Mikrofonga yaqinroq gapirib ko‘ring.");
+        else onError(t("voice.noSpeech"));
       } catch (e) {
         onError((e as Error).message);
       } finally {
@@ -145,10 +147,10 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
         <span className="w-10 font-mono text-xs tabular-nums text-neutral-400">
           {Math.floor(sec / 60)}:{String(sec % 60).padStart(2, "0")}
         </span>
-        <button onClick={cancel} aria-label="Bekor qilish" className="rounded p-1 text-neutral-400 hover:text-white">
+        <button onClick={cancel} aria-label={t("voice.cancel")} className="rounded p-1 text-neutral-400 hover:text-neutral-50">
           <X size={14} />
         </button>
-        <button onClick={stop} aria-label="Tugatish" className="rounded bg-red-600 p-1.5 hover:bg-red-500">
+        <button onClick={stop} aria-label={t("voice.finish")} className="rounded bg-red-600 p-1.5 hover:bg-red-500">
           <Square size={12} />
         </button>
       </div>
@@ -159,9 +161,9 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
       type="button"
       onClick={start}
       disabled={phase === "transcribing"}
-      aria-label="Ovozli xabar"
-      title="Ovozli xabar (gapiring, keyin to'xtating)"
-      className="rounded-md border border-neutral-700 px-3 text-neutral-300 transition hover:border-violet-500 hover:text-white disabled:opacity-60"
+      aria-label={t("voice.button")}
+      title={t("voice.button")}
+      className="rounded-md border border-neutral-700 px-3 text-neutral-300 transition hover:border-violet-500 hover:text-neutral-50 disabled:opacity-60"
     >
       {phase === "transcribing" ? <Loader2 size={16} className="animate-spin" /> : <Mic size={16} />}
     </button>

@@ -1,0 +1,337 @@
+"use client";
+
+/** Interfeys tillari: o'zbek (asosiy), ingliz, rus. Tarjima topilmasa o'zbekchasi ko'rsatiladi. */
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+
+export type Lang = "uz" | "en" | "ru";
+export const LANGS: { id: Lang; label: string; flag: string }[] = [
+  { id: "uz", label: "O‘zbekcha", flag: "🇺🇿" },
+  { id: "en", label: "English", flag: "🇬🇧" },
+  { id: "ru", label: "Русский", flag: "🇷🇺" },
+];
+
+const uz = {
+  // umumiy
+  "common.save": "Saqlash", "common.saved": "Saqlandi", "common.cancel": "Bekor qilish", "common.delete": "O‘chirish",
+  "common.close": "Yopish", "common.loading": "Yuklanmoqda…", "common.soon": "Tez orada", "common.new": "Yangi",
+  "common.confirm": "Tasdiqlash", "common.on": "Yoqilgan", "common.off": "O‘chirilgan",
+  // navigatsiya
+  "nav.chat": "Chat", "nav.agent": "Agent", "nav.media": "Media Studio", "nav.settings": "Sozlamalar",
+  // hisob menyusi
+  "menu.settings": "Sozlamalar", "menu.usage": "Foydalanish", "menu.language": "Til", "menu.help": "Yordam",
+  "menu.upgrade": "Tarifni oshirish", "menu.apps": "Ilovalar va kengaytmalar", "menu.learn": "Batafsil",
+  "menu.apiKeys": "API kalit olish", "menu.logout": "Chiqish", "menu.about": "OmniAI haqida",
+  "menu.shortcuts": "Tezkor tugmalar", "menu.privacy": "Maxfiylik", "menu.theme": "Mavzu",
+  "plan.byok": "O‘z kalitlari", "plan.free": "Bepul", "plan.none": "Kalit yo‘q",
+  // mavzu
+  "theme.system": "Tizim", "theme.light": "Yorug‘", "theme.dark": "Qorong‘i",
+  // sozlamalar
+  "settings.title": "Sozlamalar",
+  "settings.tab.general": "Umumiy", "settings.tab.ai": "AI xatti-harakati", "settings.tab.keys": "API kalitlar",
+  "settings.tab.usage": "Foydalanish", "settings.tab.account": "Hisob", "settings.tab.privacy": "Maxfiylik",
+  "settings.tab.shortcuts": "Tezkor tugmalar", "settings.tab.desktop": "Desktop ilova",
+  "settings.profile": "Profil", "settings.fullName": "To‘liq ism", "settings.nickname": "AI sizni qanday chaqirsin?",
+  "settings.nicknameHint": "Masalan: Umar. AI javoblarda shu ismni ishlatadi.",
+  "settings.avatarColor": "Avatar rangi", "settings.appearance": "Ko‘rinish", "settings.theme": "Mavzu",
+  "settings.fontSize": "Shrift o‘lchami", "settings.font.sm": "Kichik", "settings.font.md": "O‘rta", "settings.font.lg": "Katta",
+  "settings.language": "Interfeys tili", "settings.sendWithEnter": "Enter — yuborish (Shift+Enter — yangi qator)",
+  "settings.defaultModel": "Standart model", "settings.defaultModelHint": "Yangi chat shu model bilan ochiladi.",
+  "settings.responseLanguage": "AI javob tili", "settings.lang.auto": "Avtomatik (siz yozgan tilda)",
+  "settings.instructions": "Shaxsiy ko‘rsatmalar",
+  "settings.instructionsHint": "AI har bir suhbatda buni hisobga oladi. Masalan: “Men dasturchiman, javoblar qisqa va kod bilan bo‘lsin.”",
+  "settings.keysInfo": "API kalitlar serverda shifrlangan holda saqlanadi. O‘z kalitingiz bo‘lsa, limit qo‘llanmaydi.",
+  "settings.keyPlaceholder": "API kalitni kiriting", "settings.keyReplace": "Yangi kalit bilan almashtirish",
+  "settings.platformKey": "Platforma kaliti ishlatiladi", "settings.getKey": "Kalit olish",
+  "settings.quota": "Bepul platforma limiti", "settings.quotaHint": "O‘z kalitingiz bo‘lmagan provayderlar uchun platforma kaliti ishlatiladi.",
+  "settings.requests": "so‘rov",
+  "usage.title": "Foydalanish", "usage.last14": "Oxirgi 14 kun", "usage.total": "Jami so‘rovlar",
+  "usage.byModel": "Modellar bo‘yicha", "usage.byKind": "Turlari bo‘yicha", "usage.empty": "Hali so‘rovlar yo‘q.",
+  "usage.kind.chat": "Chat", "usage.kind.agent": "Agent", "usage.kind.image": "Rasm", "usage.kind.voice": "Ovoz",
+  "account.email": "Email", "account.since": "Ro‘yxatdan o‘tgan sana", "account.password": "Parolni o‘zgartirish",
+  "account.currentPassword": "Joriy parol", "account.newPassword": "Yangi parol (kamida 8 belgi)",
+  "account.passwordChanged": "Parol o‘zgartirildi. Boshqa qurilmalardan chiqarildingiz.",
+  "account.sessions": "Sessiyalar", "account.logoutAll": "Barcha qurilmalardan chiqish",
+  "account.logoutAllHint": "Bu qurilma ham, boshqalari ham hisobdan chiqadi.",
+  "account.danger": "Xavfli hudud", "account.delete": "Hisobni o‘chirish",
+  "account.deleteHint": "Suhbatlar, kalitlar, rasmlar va statistika butunlay o‘chadi. Qaytarib bo‘lmaydi.",
+  "account.deleteConfirm": "Tasdiqlash uchun parolingizni kiriting",
+  "privacy.export": "Ma’lumotlarni yuklab olish", "privacy.exportHint": "Barcha suhbatlar va sozlamalar JSON faylda. API kalitlar kirmaydi.",
+  "privacy.deleteChats": "Barcha suhbatlarni o‘chirish", "privacy.deleteChatsHint": "Chat tarixi butunlay o‘chadi.",
+  "privacy.deleteChatsConfirm": "Rostdan ham barcha suhbatlarni o‘chirasizmi?", "privacy.deleted": "Suhbatlar o‘chirildi",
+  "privacy.storage": "Ma’lumotlaringiz qayerda?",
+  "privacy.storageText": "Suhbatlar va sozlamalar OmniAI serveridagi bazada. API kalitlar shifrlangan. Agent rejimida fayllaringiz faqat siz tanlagan papkadan o‘qiladi va tanlangan AI provayderiga yuboriladi.",
+  "shortcuts.newChat": "Yangi suhbat", "shortcuts.settings": "Sozlamalar", "shortcuts.list": "Tezkor tugmalar ro‘yxati",
+  "shortcuts.send": "Xabar yuborish", "shortcuts.newline": "Yangi qator", "shortcuts.cancelVoice": "Ovoz yozishni bekor qilish",
+  "shortcuts.agent": "Agent", "shortcuts.toggleTheme": "Mavzuni almashtirish",
+  "desktop.connected": "Desktop ilova ulangan", "desktop.notConnected": "Siz brauzerdasiz",
+  "desktop.notConnectedHint": "Agent rejimi (kompyuterdagi papka bilan ishlash) uchun desktop ilovani o‘rnating.",
+  "desktop.version": "Ko‘prik versiyasi", "desktop.platform": "Tizim",
+  "desktop.safety": "Xavfsizlik: AI faqat siz tanlagan papkada ishlaydi; har bir yozish va buyruq uchun kompyuteringiz oynasida ruxsat so‘raladi.",
+  // modallar
+  "help.title": "Yordam", "help.q1": "API kalitni qayerdan olaman?",
+  "help.a1": "Hisob menyusi → “API kalit olish” bo‘limida Claude, Deepseek va Gemini sahifalariga havolalar bor. Kalitni Sozlamalar → API kalitlar ga kiriting.",
+  "help.q2": "Claude Pro obunamni ulasam bo‘ladimi?",
+  "help.a2": "Yo‘q. Anthropic obunalarni boshqa ilovalarda ishlatishga ruxsat bermaydi. Faqat API kalit ishlaydi.",
+  "help.q3": "Agent rejimi nima?",
+  "help.a3": "Desktop ilovada AI siz tanlagan papka bilan ishlaydi: fayllarni o‘qiydi, yozadi, buyruq ishga tushiradi. Har bir o‘zgarish uchun ruxsat so‘raladi.",
+  "help.q4": "Ovozli buyruq qanday ishlaydi?",
+  "help.a4": "Mikrofon tugmasini bosing, gapiring, keyin to‘xtating. Matn kiritish maydoniga tushadi. Gemini kaliti kerak.",
+  "help.q5": "Limit tugadi, nima qilaman?",
+  "help.a5": "O‘z API kalitingizni kiriting — unda limit qo‘llanmaydi. Yoki keyingi oyni kuting.",
+  "upgrade.title": "Tarifni tanlang", "upgrade.current": "Joriy",
+  "upgrade.free": "Bepul", "upgrade.freeDesc": "Platforma kaliti bilan oyiga cheklangan so‘rovlar",
+  "upgrade.byok": "O‘z kalitlari", "upgrade.byokDesc": "Cheklovsiz. Provayderga o‘zingiz to‘laysiz",
+  "upgrade.pro": "Pro", "upgrade.proDesc": "Ko‘proq so‘rovlar, Opus va video — to‘lov tizimi tez orada",
+  "upgrade.f.chat": "Barcha chat modellari", "upgrade.f.agent": "Agent rejimi (desktop)", "upgrade.f.voice": "Ovozli buyruqlar",
+  "upgrade.f.unlimited": "Cheksiz so‘rovlar", "upgrade.f.priority": "Ustuvor tezlik", "upgrade.f.video": "Video yaratish",
+  "apps.title": "Ilovalar", "apps.desktop": "Desktop ilova", "apps.desktopDesc": "Windows, macOS, Linux. Agent rejimi va papkalar bilan ishlash.",
+  "apps.web": "Veb-versiya", "apps.webDesc": "Istalgan brauzerda — hozir shu yerdasiz.",
+  "apps.mobile": "Mobil ilova", "apps.installed": "O‘rnatilgan", "apps.howTo": "Qanday o‘rnatiladi",
+  "about.title": "OmniAI Workspace haqida", "about.text": "Claude, Deepseek va Gemini bir joyda: chat, agent, canvas, ovoz va rasm yaratish.",
+  "about.version": "Versiya",
+  // chat
+  "chat.newChat": "Yangi suhbat", "chat.placeholder": "Xabar yozing (Enter — yuborish, Shift+Enter — yangi qator)",
+  "chat.placeholderNoEnter": "Xabar yozing (Ctrl+Enter — yuborish)", "chat.empty": "Savol yozing — Claude, Deepseek va Gemini bir suhbatda.",
+  "chat.attachCanvas": "Canvasni AI ga ko‘rsatish (rasm sifatida ilova qilinadi)", "chat.canvasAttached": "🖼 Canvas rasmi ilova qilindi",
+  "chat.handoff": "kontekst uzatildi", "chat.toSettings": "Sozlamalarga o‘tish", "chat.canvasEmpty": "Canvas bo‘sh yoki ochilmagan, shuning uchun rasm ilova qilinmadi.",
+  "chat.noVision": "rasmni ko‘ra olmaydi. Claude yoki Gemini ni tanlang.", "chat.send": "Yuborish", "chat.stop": "To‘xtatish",
+  "chat.thinking.1": "javob tayyorlamoqda", "chat.thinking.2": "chuqur o‘ylayapti", "chat.thinking.3": "katta javob yozmoqda, biroz sabr",
+  "chat.preview": "Preview", "chat.canvas": "Canvas", "chat.togglePanel": "Panelni ochish/yopish",
+  "preview.empty": "AI HTML/CSS/JS kod yozganda, natija shu yerda avtomatik ko‘rinadi.", "preview.example": "Masalan: “oddiy kalkulyator sahifasini yoz”.",
+  "preview.writing": "AI yozmoqda… tugagach natija yangilanadi", "preview.rerun": "Qayta ishga tushirish", "canvas.loading": "Canvas yuklanmoqda…",
+  // ovoz
+  "voice.button": "Ovozli xabar", "voice.cancel": "Bekor qilish", "voice.finish": "Tugatish",
+  "voice.denied": "Mikrofonga ruxsat berilmadi. Brauzer sozlamalarida mikrofonni yoqing.", "voice.noSpeech": "Nutq aniqlanmadi. Mikrofonga yaqinroq gapirib ko‘ring.",
+  // agent
+  "agent.title": "Agent rejimi", "agent.pickFolder": "Papka tanlash", "agent.newSession": "Yangi sessiya",
+  "agent.needsDesktop": "Agent kompyuteringizdagi papka bilan ishlaydi: fayllarni o‘qiydi, yozadi, qidiradi va buyruqlarni ishga tushiradi. Xavfsizlik uchun bu faqat OmniAI desktop ilovasida ishlaydi — brauzer sahifasi kompyuteringiz fayllariga kira olmaydi.",
+  "agent.installDesktop": "Windows, macOS va Linux uchun desktop ilovani o‘rnating",
+  "agent.pickFirst": "Avval AI ishlaydigan papkani tanlang. Har bir yozish va buyruq uchun sizdan ruxsat so‘raladi.",
+  "agent.ready": "“{folder}” bilan ishlashga tayyorman. Masalan: “loyiha tuzilmasini tushuntir” yoki “README yoz”.",
+  "agent.placeholder": "Vazifa yozing yoki mikrofon orqali ayting…", "agent.placeholderNoFolder": "Avval papka tanlang",
+  "agent.working": "Agent ishlamoqda…", "agent.waitingApproval": "ruxsatingiz kutilmoqda — oynani tekshiring",
+  "agent.open": "Ochish", "agent.reveal": "Papkada ko‘rsatish", "agent.modelLocked": "Modelni almashtirish uchun yangi sessiya boshlang",
+  "agent.stopped": "To‘xtatildi.", "agent.maxSteps": "{n} qadam chegarasiga yetildi. “Davom et” deb yozing.",
+  "tool.list_dir": "Papkani ko‘rish", "tool.read_file": "O‘qish", "tool.write_file": "Yozish", "tool.edit_file": "O‘zgartirish",
+  "tool.search_files": "Qidirish", "tool.run_command": "Buyruq",
+  // media
+  "media.subtitle": "Matn yozing, AI rasm yaratadi (Gemini kaliti kerak).", "media.placeholder": "Masalan: quyosh botayotgan paytda tog‘ ko‘li, realistik rasm",
+  "media.generate": "Rasm yaratish", "media.generating": "Yaratilmoqda…", "media.video": "Video yaratish keyingi versiyada qo‘shiladi.",
+  "media.empty": "Hali rasm yo‘q. Birinchisini yarating.", "media.download": "Yuklab olish",
+  "media.dev.1": "Ranglar aralashtirilmoqda…", "media.dev.2": "Yorug‘lik sozlanmoqda…", "media.dev.3": "Piksellar o‘z joyini topmoqda…",
+  "media.dev.4": "Soyalar chizilmoqda…", "media.dev.5": "Oxirgi silliqlash…",
+  // login
+  "login.signIn": "Hisobingizga kiring", "login.signUp": "Yangi hisob yarating", "login.password": "Parol (kamida 8 belgi)",
+  "login.submitIn": "Kirish", "login.submitUp": "Ro‘yxatdan o‘tish", "login.toSignUp": "Hisobingiz yo‘qmi? Ro‘yxatdan o‘ting",
+  "login.toSignIn": "Hisobingiz bormi? Kiring", "login.invalid": "Email to‘g‘ri emas yoki parol 8 belgidan qisqa.",
+  "error.title": "Nimadir xato ketdi", "error.text": "Sahifani qayta yuklab ko‘ring.", "error.retry": "Qayta urinish",
+};
+
+export type TKey = keyof typeof uz;
+type Dict = Partial<Record<TKey, string>>;
+
+const en: Dict = {
+  "common.save": "Save", "common.saved": "Saved", "common.cancel": "Cancel", "common.delete": "Delete", "common.close": "Close",
+  "common.loading": "Loading…", "common.soon": "Coming soon", "common.new": "New", "common.confirm": "Confirm", "common.on": "On", "common.off": "Off",
+  "nav.chat": "Chat", "nav.agent": "Agent", "nav.media": "Media Studio", "nav.settings": "Settings",
+  "menu.settings": "Settings", "menu.usage": "Usage", "menu.language": "Language", "menu.help": "Get help", "menu.upgrade": "Upgrade plan",
+  "menu.apps": "Get apps and extensions", "menu.learn": "Learn more", "menu.apiKeys": "Get API keys", "menu.logout": "Log out",
+  "menu.about": "About OmniAI", "menu.shortcuts": "Keyboard shortcuts", "menu.privacy": "Privacy", "menu.theme": "Theme",
+  "plan.byok": "Own keys", "plan.free": "Free", "plan.none": "No key",
+  "theme.system": "System", "theme.light": "Light", "theme.dark": "Dark",
+  "settings.title": "Settings", "settings.tab.general": "General", "settings.tab.ai": "AI behavior", "settings.tab.keys": "API keys",
+  "settings.tab.usage": "Usage", "settings.tab.account": "Account", "settings.tab.privacy": "Privacy", "settings.tab.shortcuts": "Shortcuts",
+  "settings.tab.desktop": "Desktop app", "settings.profile": "Profile", "settings.fullName": "Full name",
+  "settings.nickname": "What should AI call you?", "settings.nicknameHint": "E.g. Umar. AI will use this name in replies.",
+  "settings.avatarColor": "Avatar color", "settings.appearance": "Appearance", "settings.theme": "Theme", "settings.fontSize": "Font size",
+  "settings.font.sm": "Small", "settings.font.md": "Medium", "settings.font.lg": "Large", "settings.language": "Interface language",
+  "settings.sendWithEnter": "Enter sends (Shift+Enter — new line)", "settings.defaultModel": "Default model",
+  "settings.defaultModelHint": "New chats start with this model.", "settings.responseLanguage": "AI reply language",
+  "settings.lang.auto": "Automatic (the language you write in)", "settings.instructions": "Personal instructions",
+  "settings.instructionsHint": "AI considers this in every chat. E.g. “I'm a developer, keep answers short with code.”",
+  "settings.keysInfo": "API keys are stored encrypted on the server. With your own key no limit applies.",
+  "settings.keyPlaceholder": "Enter API key", "settings.keyReplace": "Replace with a new key", "settings.platformKey": "Using platform key",
+  "settings.getKey": "Get key", "settings.quota": "Free platform quota", "settings.quotaHint": "Providers without your own key use the platform key.",
+  "settings.requests": "requests", "usage.title": "Usage", "usage.last14": "Last 14 days", "usage.total": "Total requests",
+  "usage.byModel": "By model", "usage.byKind": "By type", "usage.empty": "No requests yet.", "usage.kind.chat": "Chat",
+  "usage.kind.agent": "Agent", "usage.kind.image": "Image", "usage.kind.voice": "Voice",
+  "account.email": "Email", "account.since": "Member since", "account.password": "Change password", "account.currentPassword": "Current password",
+  "account.newPassword": "New password (min 8 characters)", "account.passwordChanged": "Password changed. Other devices were signed out.",
+  "account.sessions": "Sessions", "account.logoutAll": "Log out of all devices", "account.logoutAllHint": "This and every other device will be signed out.",
+  "account.danger": "Danger zone", "account.delete": "Delete account",
+  "account.deleteHint": "Chats, keys, images and stats are permanently deleted. This cannot be undone.",
+  "account.deleteConfirm": "Enter your password to confirm",
+  "privacy.export": "Export data", "privacy.exportHint": "All chats and settings as a JSON file. API keys are not included.",
+  "privacy.deleteChats": "Delete all chats", "privacy.deleteChatsHint": "Chat history is permanently deleted.",
+  "privacy.deleteChatsConfirm": "Delete all chats?", "privacy.deleted": "Chats deleted", "privacy.storage": "Where is your data?",
+  "privacy.storageText": "Chats and settings live in the OmniAI server database. API keys are encrypted. In Agent mode your files are read only from the folder you pick and sent to the chosen AI provider.",
+  "shortcuts.newChat": "New chat", "shortcuts.settings": "Settings", "shortcuts.list": "Shortcut list", "shortcuts.send": "Send message",
+  "shortcuts.newline": "New line", "shortcuts.cancelVoice": "Cancel voice recording", "shortcuts.agent": "Agent", "shortcuts.toggleTheme": "Toggle theme",
+  "desktop.connected": "Desktop app connected", "desktop.notConnected": "You are in the browser",
+  "desktop.notConnectedHint": "Install the desktop app for Agent mode (working with a folder on your computer).",
+  "desktop.version": "Bridge version", "desktop.platform": "System",
+  "desktop.safety": "Safety: AI works only in the folder you pick; every write and command asks for approval in a native dialog.",
+  "help.title": "Help", "help.q1": "Where do I get an API key?",
+  "help.a1": "Account menu → “Get API keys” links to the Claude, Deepseek and Gemini consoles. Paste the key in Settings → API keys.",
+  "help.q2": "Can I connect my Claude Pro subscription?", "help.a2": "No. Anthropic does not allow subscriptions in third-party apps. Only API keys work.",
+  "help.q3": "What is Agent mode?", "help.a3": "In the desktop app the AI works in a folder you pick: reads, writes, runs commands. Every change asks for approval.",
+  "help.q4": "How do voice commands work?", "help.a4": "Press the mic, speak, then stop. The text lands in the input. Requires a Gemini key.",
+  "help.q5": "My quota ran out", "help.a5": "Add your own API key — no limit then. Or wait for next month.",
+  "upgrade.title": "Choose a plan", "upgrade.current": "Current", "upgrade.free": "Free", "upgrade.freeDesc": "Limited monthly requests on the platform key",
+  "upgrade.byok": "Own keys", "upgrade.byokDesc": "Unlimited. You pay the provider directly", "upgrade.pro": "Pro",
+  "upgrade.proDesc": "More requests, Opus and video — payments coming soon", "upgrade.f.chat": "All chat models", "upgrade.f.agent": "Agent mode (desktop)",
+  "upgrade.f.voice": "Voice commands", "upgrade.f.unlimited": "Unlimited requests", "upgrade.f.priority": "Priority speed", "upgrade.f.video": "Video generation",
+  "apps.title": "Apps", "apps.desktop": "Desktop app", "apps.desktopDesc": "Windows, macOS, Linux. Agent mode and folders.",
+  "apps.web": "Web", "apps.webDesc": "Any browser — you are here now.", "apps.mobile": "Mobile app", "apps.installed": "Installed", "apps.howTo": "How to install",
+  "about.title": "About OmniAI Workspace", "about.text": "Claude, Deepseek and Gemini in one place: chat, agent, canvas, voice and images.", "about.version": "Version",
+  "chat.newChat": "New chat", "chat.placeholder": "Type a message (Enter — send, Shift+Enter — new line)", "chat.placeholderNoEnter": "Type a message (Ctrl+Enter — send)",
+  "chat.empty": "Ask anything — Claude, Deepseek and Gemini in one chat.", "chat.attachCanvas": "Show the canvas to AI (attached as an image)",
+  "chat.canvasAttached": "🖼 Canvas image attached", "chat.handoff": "context handed over", "chat.toSettings": "Open Settings",
+  "chat.canvasEmpty": "The canvas is empty or not opened, so no image was attached.", "chat.noVision": "can't see images. Choose Claude or Gemini.",
+  "chat.send": "Send", "chat.stop": "Stop", "chat.thinking.1": "is preparing a reply", "chat.thinking.2": "is thinking deeply", "chat.thinking.3": "is writing a long reply, hang on",
+  "chat.togglePanel": "Toggle panel", "preview.empty": "When AI writes HTML/CSS/JS, the result appears here automatically.",
+  "preview.example": "E.g. “write a simple calculator page”.", "preview.writing": "AI is writing… the result updates when done", "preview.rerun": "Re-run",
+  "canvas.loading": "Loading canvas…", "voice.button": "Voice message", "voice.cancel": "Cancel", "voice.finish": "Finish",
+  "voice.denied": "Microphone access denied. Enable it in browser settings.", "voice.noSpeech": "No speech detected. Try speaking closer to the mic.",
+  "agent.title": "Agent mode", "agent.pickFolder": "Pick folder", "agent.newSession": "New session",
+  "agent.needsDesktop": "The agent works with a folder on your computer: reads, writes, searches files and runs commands. For safety this only works in the OmniAI desktop app — a web page can't access your files.",
+  "agent.installDesktop": "Install the desktop app for Windows, macOS and Linux",
+  "agent.pickFirst": "First pick the folder AI will work in. Every write and command asks for your approval.",
+  "agent.ready": "Ready to work with “{folder}”. E.g. “explain the project structure” or “write a README”.",
+  "agent.placeholder": "Describe a task or say it via the mic…", "agent.placeholderNoFolder": "Pick a folder first", "agent.working": "Agent is working…",
+  "agent.waitingApproval": "waiting for your approval — check the dialog", "agent.open": "Open", "agent.reveal": "Show in folder",
+  "agent.modelLocked": "Start a new session to change the model", "agent.stopped": "Stopped.", "agent.maxSteps": "Reached the {n}-step limit. Type “continue”.",
+  "tool.list_dir": "List folder", "tool.read_file": "Read", "tool.write_file": "Write", "tool.edit_file": "Edit", "tool.search_files": "Search", "tool.run_command": "Command",
+  "media.subtitle": "Describe it, AI draws it (Gemini key required).", "media.placeholder": "E.g. a mountain lake at sunset, photorealistic",
+  "media.generate": "Generate image", "media.generating": "Generating…", "media.video": "Video generation is coming in the next version.",
+  "media.empty": "No images yet. Create the first one.", "media.download": "Download", "media.dev.1": "Mixing colors…", "media.dev.2": "Adjusting the light…",
+  "media.dev.3": "Pixels finding their place…", "media.dev.4": "Drawing shadows…", "media.dev.5": "Final polish…",
+  "login.signIn": "Sign in to your account", "login.signUp": "Create a new account", "login.password": "Password (min 8 characters)",
+  "login.submitIn": "Sign in", "login.submitUp": "Sign up", "login.toSignUp": "No account? Sign up", "login.toSignIn": "Have an account? Sign in",
+  "login.invalid": "Invalid email or password shorter than 8 characters.", "error.title": "Something went wrong", "error.text": "Try reloading the page.", "error.retry": "Try again",
+};
+
+const ru: Dict = {
+  "common.save": "Сохранить", "common.saved": "Сохранено", "common.cancel": "Отмена", "common.delete": "Удалить", "common.close": "Закрыть",
+  "common.loading": "Загрузка…", "common.soon": "Скоро", "common.new": "Новое", "common.confirm": "Подтвердить", "common.on": "Вкл", "common.off": "Выкл",
+  "nav.chat": "Чат", "nav.agent": "Агент", "nav.media": "Медиа-студия", "nav.settings": "Настройки",
+  "menu.settings": "Настройки", "menu.usage": "Использование", "menu.language": "Язык", "menu.help": "Помощь", "menu.upgrade": "Улучшить тариф",
+  "menu.apps": "Приложения и расширения", "menu.learn": "Подробнее", "menu.apiKeys": "Получить API-ключи", "menu.logout": "Выйти",
+  "menu.about": "Об OmniAI", "menu.shortcuts": "Горячие клавиши", "menu.privacy": "Конфиденциальность", "menu.theme": "Тема",
+  "plan.byok": "Свои ключи", "plan.free": "Бесплатно", "plan.none": "Нет ключа",
+  "theme.system": "Системная", "theme.light": "Светлая", "theme.dark": "Тёмная",
+  "settings.title": "Настройки", "settings.tab.general": "Общие", "settings.tab.ai": "Поведение ИИ", "settings.tab.keys": "API-ключи",
+  "settings.tab.usage": "Использование", "settings.tab.account": "Аккаунт", "settings.tab.privacy": "Конфиденциальность",
+  "settings.tab.shortcuts": "Горячие клавиши", "settings.tab.desktop": "Десктоп-приложение", "settings.profile": "Профиль",
+  "settings.fullName": "Полное имя", "settings.nickname": "Как ИИ должен к вам обращаться?", "settings.nicknameHint": "Например: Умар. ИИ будет использовать это имя.",
+  "settings.avatarColor": "Цвет аватара", "settings.appearance": "Внешний вид", "settings.theme": "Тема", "settings.fontSize": "Размер шрифта",
+  "settings.font.sm": "Мелкий", "settings.font.md": "Средний", "settings.font.lg": "Крупный", "settings.language": "Язык интерфейса",
+  "settings.sendWithEnter": "Enter — отправить (Shift+Enter — новая строка)", "settings.defaultModel": "Модель по умолчанию",
+  "settings.defaultModelHint": "Новые чаты открываются с этой моделью.", "settings.responseLanguage": "Язык ответов ИИ",
+  "settings.lang.auto": "Автоматически (язык вашего сообщения)", "settings.instructions": "Личные инструкции",
+  "settings.instructionsHint": "ИИ учитывает это в каждом чате. Например: «Я программист, отвечай кратко и с кодом».",
+  "settings.keysInfo": "API-ключи хранятся на сервере в зашифрованном виде. Со своим ключом лимит не действует.",
+  "settings.keyPlaceholder": "Введите API-ключ", "settings.keyReplace": "Заменить новым ключом", "settings.platformKey": "Используется ключ платформы",
+  "settings.getKey": "Получить ключ", "settings.quota": "Бесплатный лимит платформы", "settings.quotaHint": "Для провайдеров без вашего ключа используется ключ платформы.",
+  "settings.requests": "запросов", "usage.title": "Использование", "usage.last14": "Последние 14 дней", "usage.total": "Всего запросов",
+  "usage.byModel": "По моделям", "usage.byKind": "По типам", "usage.empty": "Запросов пока нет.", "usage.kind.chat": "Чат",
+  "usage.kind.agent": "Агент", "usage.kind.image": "Изображение", "usage.kind.voice": "Голос",
+  "account.email": "Email", "account.since": "Дата регистрации", "account.password": "Сменить пароль", "account.currentPassword": "Текущий пароль",
+  "account.newPassword": "Новый пароль (мин. 8 символов)", "account.passwordChanged": "Пароль изменён. Другие устройства вышли из аккаунта.",
+  "account.sessions": "Сеансы", "account.logoutAll": "Выйти на всех устройствах", "account.logoutAllHint": "Выйдут и это, и все остальные устройства.",
+  "account.danger": "Опасная зона", "account.delete": "Удалить аккаунт",
+  "account.deleteHint": "Чаты, ключи, изображения и статистика будут удалены навсегда. Отменить нельзя.",
+  "account.deleteConfirm": "Введите пароль для подтверждения",
+  "privacy.export": "Экспорт данных", "privacy.exportHint": "Все чаты и настройки в JSON-файле. API-ключи не включаются.",
+  "privacy.deleteChats": "Удалить все чаты", "privacy.deleteChatsHint": "История чатов будет удалена навсегда.",
+  "privacy.deleteChatsConfirm": "Удалить все чаты?", "privacy.deleted": "Чаты удалены", "privacy.storage": "Где хранятся данные?",
+  "privacy.storageText": "Чаты и настройки — в базе данных сервера OmniAI. API-ключи зашифрованы. В режиме агента файлы читаются только из выбранной папки и отправляются выбранному ИИ-провайдеру.",
+  "shortcuts.newChat": "Новый чат", "shortcuts.settings": "Настройки", "shortcuts.list": "Список горячих клавиш", "shortcuts.send": "Отправить сообщение",
+  "shortcuts.newline": "Новая строка", "shortcuts.cancelVoice": "Отменить запись голоса", "shortcuts.agent": "Агент", "shortcuts.toggleTheme": "Сменить тему",
+  "desktop.connected": "Десктоп-приложение подключено", "desktop.notConnected": "Вы в браузере",
+  "desktop.notConnectedHint": "Для режима агента (работа с папкой на компьютере) установите десктоп-приложение.",
+  "desktop.version": "Версия моста", "desktop.platform": "Система",
+  "desktop.safety": "Безопасность: ИИ работает только в выбранной папке; каждая запись и команда требует подтверждения в системном окне.",
+  "help.title": "Помощь", "help.q1": "Где взять API-ключ?", "help.a1": "Меню аккаунта → «Получить API-ключи»: ссылки на консоли Claude, Deepseek и Gemini. Вставьте ключ в Настройки → API-ключи.",
+  "help.q2": "Можно подключить подписку Claude Pro?", "help.a2": "Нет. Anthropic не разрешает использовать подписки в сторонних приложениях. Работают только API-ключи.",
+  "help.q3": "Что такое режим агента?", "help.a3": "В десктоп-приложении ИИ работает в выбранной папке: читает, пишет, запускает команды. Каждое изменение требует подтверждения.",
+  "help.q4": "Как работают голосовые команды?", "help.a4": "Нажмите микрофон, говорите, затем остановите. Текст появится в поле ввода. Нужен ключ Gemini.",
+  "help.q5": "Лимит закончился", "help.a5": "Добавьте свой API-ключ — тогда лимита нет. Или дождитесь следующего месяца.",
+  "upgrade.title": "Выберите тариф", "upgrade.current": "Текущий", "upgrade.free": "Бесплатно", "upgrade.freeDesc": "Ограниченные запросы в месяц на ключе платформы",
+  "upgrade.byok": "Свои ключи", "upgrade.byokDesc": "Без ограничений. Оплачиваете провайдеру сами", "upgrade.pro": "Pro",
+  "upgrade.proDesc": "Больше запросов, Opus и видео — оплата скоро", "upgrade.f.chat": "Все модели чата", "upgrade.f.agent": "Режим агента (десктоп)",
+  "upgrade.f.voice": "Голосовые команды", "upgrade.f.unlimited": "Безлимитные запросы", "upgrade.f.priority": "Приоритетная скорость", "upgrade.f.video": "Генерация видео",
+  "apps.title": "Приложения", "apps.desktop": "Десктоп-приложение", "apps.desktopDesc": "Windows, macOS, Linux. Режим агента и папки.",
+  "apps.web": "Веб-версия", "apps.webDesc": "В любом браузере — вы здесь.", "apps.mobile": "Мобильное приложение", "apps.installed": "Установлено", "apps.howTo": "Как установить",
+  "about.title": "Об OmniAI Workspace", "about.text": "Claude, Deepseek и Gemini в одном месте: чат, агент, холст, голос и изображения.", "about.version": "Версия",
+  "chat.newChat": "Новый чат", "chat.placeholder": "Напишите сообщение (Enter — отправить, Shift+Enter — новая строка)",
+  "chat.placeholderNoEnter": "Напишите сообщение (Ctrl+Enter — отправить)", "chat.empty": "Задайте вопрос — Claude, Deepseek и Gemini в одном чате.",
+  "chat.attachCanvas": "Показать холст ИИ (прикрепляется как изображение)", "chat.canvasAttached": "🖼 Изображение холста прикреплено",
+  "chat.handoff": "контекст передан", "chat.toSettings": "Открыть настройки", "chat.canvasEmpty": "Холст пуст или не открыт, изображение не прикреплено.",
+  "chat.noVision": "не видит изображения. Выберите Claude или Gemini.", "chat.send": "Отправить", "chat.stop": "Остановить",
+  "chat.thinking.1": "готовит ответ", "chat.thinking.2": "глубоко думает", "chat.thinking.3": "пишет большой ответ, немного терпения",
+  "chat.togglePanel": "Показать/скрыть панель", "preview.empty": "Когда ИИ напишет HTML/CSS/JS, результат появится здесь.",
+  "preview.example": "Например: «напиши простую страницу калькулятора».", "preview.writing": "ИИ пишет… результат обновится после завершения",
+  "preview.rerun": "Перезапустить", "canvas.loading": "Загрузка холста…", "voice.button": "Голосовое сообщение", "voice.cancel": "Отмена", "voice.finish": "Готово",
+  "voice.denied": "Нет доступа к микрофону. Разрешите его в настройках браузера.", "voice.noSpeech": "Речь не распознана. Говорите ближе к микрофону.",
+  "agent.title": "Режим агента", "agent.pickFolder": "Выбрать папку", "agent.newSession": "Новый сеанс",
+  "agent.needsDesktop": "Агент работает с папкой на вашем компьютере: читает, пишет, ищет файлы и запускает команды. Для безопасности это работает только в десктоп-приложении OmniAI — веб-страница не имеет доступа к вашим файлам.",
+  "agent.installDesktop": "Установите десктоп-приложение для Windows, macOS и Linux",
+  "agent.pickFirst": "Сначала выберите папку для работы ИИ. Каждая запись и команда требует вашего подтверждения.",
+  "agent.ready": "Готов работать с «{folder}». Например: «объясни структуру проекта» или «напиши README».",
+  "agent.placeholder": "Опишите задачу или скажите через микрофон…", "agent.placeholderNoFolder": "Сначала выберите папку", "agent.working": "Агент работает…",
+  "agent.waitingApproval": "ждём вашего подтверждения — проверьте окно", "agent.open": "Открыть", "agent.reveal": "Показать в папке",
+  "agent.modelLocked": "Чтобы сменить модель, начните новый сеанс", "agent.stopped": "Остановлено.", "agent.maxSteps": "Достигнут лимит в {n} шагов. Напишите «продолжай».",
+  "tool.list_dir": "Просмотр папки", "tool.read_file": "Чтение", "tool.write_file": "Запись", "tool.edit_file": "Изменение", "tool.search_files": "Поиск", "tool.run_command": "Команда",
+  "media.subtitle": "Опишите — ИИ нарисует (нужен ключ Gemini).", "media.placeholder": "Например: горное озеро на закате, фотореалистично",
+  "media.generate": "Создать изображение", "media.generating": "Создаётся…", "media.video": "Генерация видео появится в следующей версии.",
+  "media.empty": "Изображений пока нет. Создайте первое.", "media.download": "Скачать", "media.dev.1": "Смешиваем цвета…", "media.dev.2": "Настраиваем свет…",
+  "media.dev.3": "Пиксели занимают места…", "media.dev.4": "Рисуем тени…", "media.dev.5": "Финальная полировка…",
+  "login.signIn": "Войдите в аккаунт", "login.signUp": "Создайте аккаунт", "login.password": "Пароль (мин. 8 символов)", "login.submitIn": "Войти",
+  "login.submitUp": "Зарегистрироваться", "login.toSignUp": "Нет аккаунта? Зарегистрируйтесь", "login.toSignIn": "Есть аккаунт? Войдите",
+  "login.invalid": "Неверный email или пароль короче 8 символов.", "error.title": "Что-то пошло не так", "error.text": "Попробуйте перезагрузить страницу.", "error.retry": "Повторить",
+};
+
+const DICTS: Record<Lang, Dict> = { uz, en, ru };
+const STORAGE_KEY = "omniai-lang";
+
+export function translate(lang: Lang, key: TKey, vars?: Record<string, string | number>): string {
+  let s = DICTS[lang][key] ?? uz[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v));
+  return s;
+}
+
+type Ctx = { lang: Lang; setLang: (l: Lang) => void; t: (key: TKey, vars?: Record<string, string | number>) => string };
+const I18nCtx = createContext<Ctx | null>(null);
+
+/** Til konteksti. Kirishdan oldin ham ishlashi uchun tanlov brauzerda ham eslab qolinadi. */
+export function I18nProvider({ children }: { children: React.ReactNode }) {
+  const [lang, setLangState] = useState<Lang>("uz");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY) as Lang | null;
+      if (saved && saved in DICTS) setLangState(saved);
+    } catch {
+      /* e'tiborsiz */
+    }
+  }, []);
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+  const setLang = useCallback((l: Lang) => {
+    setLangState(l);
+    try {
+      localStorage.setItem(STORAGE_KEY, l);
+    } catch {
+      /* e'tiborsiz */
+    }
+  }, []);
+  const t = useCallback((key: TKey, vars?: Record<string, string | number>) => translate(lang, key, vars), [lang]);
+  return <I18nCtx.Provider value={{ lang, setLang, t }}>{children}</I18nCtx.Provider>;
+}
+
+export function useI18n() {
+  const ctx = useContext(I18nCtx);
+  if (!ctx) throw new Error("useI18n faqat I18nProvider ichida ishlaydi");
+  return ctx;
+}

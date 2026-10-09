@@ -41,6 +41,14 @@ def _consume(db: Session, user: User) -> bool:
     return row is not None
 
 
+def resolve_key_info(db: Session, user: User, provider: Provider) -> tuple[str, bool]:
+    """(kalit, platforma_kalitimi) qaytaradi."""
+    own = db.scalar(select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.provider == provider))
+    if own is not None:
+        return resolve_key(db, user, provider), False
+    return resolve_key(db, user, provider), True
+
+
 def resolve_key(db: Session, user: User, provider: Provider) -> str:
     """Foydalanuvchining kaliti bo'lsa o'shani, aks holda platforma kalitini (limit bo'lsa) qaytaradi."""
     own = db.scalar(select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.provider == provider))

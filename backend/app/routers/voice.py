@@ -11,7 +11,8 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models import Provider, User
 from app.providers.base import friendly_http_error
-from app.quota import resolve_key
+from app.quota import resolve_key_info
+from app.usage_log import record
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
@@ -41,7 +42,8 @@ async def transcribe(body: VoiceIn, db: Session = Depends(get_db), user: User = 
     if body.mime == "audio/wav" and not (raw[:4] == b"RIFF" and raw[8:12] == b"WAVE"):
         raise HTTPException(400, "Audio WAV formatida emas.")
 
-    api_key = resolve_key(db, user, Provider.gemini)
+    api_key, platform = resolve_key_info(db, user, Provider.gemini)
+    record(user.id, "voice", "gemini", TRANSCRIBE_MODEL, platform)
     db.close()
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{TRANSCRIBE_MODEL}:generateContent"

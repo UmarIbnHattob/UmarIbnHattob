@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n";
+import { useAuth } from "@/components/AuthGate";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Eye, PanelRightClose, PanelRightOpen, PenTool, Plus, Send, Square, Trash2 } from "lucide-react";
@@ -17,20 +19,26 @@ import type { CanvasHandle } from "@/components/CanvasPanel";
 // Excalidraw faqat brauzerda ishlaydi va og'ir: kerak bo'lganda yuklanadi
 const CanvasPanel = dynamic(() => import("@/components/CanvasPanel"), {
   ssr: false,
-  loading: () => <p className="p-6 text-sm text-neutral-500">Canvas yuklanmoqda…</p>,
+  loading: () => <CanvasLoading />,
 });
 
 type Tab = "preview" | "canvas";
 
+function CanvasLoading() {
+  const { t } = useI18n();
+  return <p className="p-6 text-sm text-neutral-500">{t("canvas.loading")}</p>;
+}
+
 /** Model javobi hali boshlanmagan payt: model rangidagi mini-orbita, yaltiroq matn va o'tgan soniyalar. */
 function Thinking({ label, provider }: { label: string | null | undefined; provider?: string }) {
+  const { t } = useI18n();
   const [sec, setSec] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setSec((s) => s + 1), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setSec((s) => s + 1), 1000);
+    return () => clearInterval(timer);
   }, []);
   // Uzoq kutilsa, kayfiyatni ko'taruvchi yozuv almashadi
-  const phrase = sec < 6 ? "javob tayyorlamoqda" : sec < 15 ? "chuqur o‘ylayapti" : "katta javob yozmoqda, biroz sabr";
+  const phrase = t(sec < 6 ? "chat.thinking.1" : sec < 15 ? "chat.thinking.2" : "chat.thinking.3");
   return (
     <div className="flex items-center gap-3 py-1 text-sm">
       <OrbitLogo size={22} focus={provider} />
@@ -44,12 +52,12 @@ function Thinking({ label, provider }: { label: string | null | undefined; provi
 
 /** Suhbat o'rtasida model almashganda: "A → B · kontekst uzatildi" va bir rangdan ikkinchisiga yuguruvchi nur. */
 function Handoff({ from, to, fromColor, toColor }: { from: string; to: string; fromColor: string; toColor: string }) {
+  const { t } = useI18n();
   return (
     <div className="msg-in mx-auto flex max-w-md flex-col items-center gap-1.5 py-1">
       <div className="handoff-line w-full" style={{ ["--from" as string]: fromColor, ["--to" as string]: toColor }} />
       <span className="text-[11px] text-neutral-500">
-        <span style={{ color: fromColor }}>{from}</span> → <span style={{ color: toColor }}>{to}</span> · kontekst
-        uzatildi
+        <span style={{ color: fromColor }}>{from}</span> → <span style={{ color: toColor }}>{to}</span> · {t("chat.handoff")}
       </span>
     </div>
   );
@@ -57,7 +65,10 @@ function Handoff({ from, to, fromColor, toColor }: { from: string; to: string; f
 
 /** Split-screen: chap tomonda chat, o'ng tomonda kod ko'rinishi va canvas (o'lchami o'zgaradi). */
 export default function ChatView() {
-  const chat = useChat();
+  const { t } = useI18n();
+  const { me } = useAuth();
+  const chat = useChat(me.preferences.default_model);
+  const sendWithEnter = me.preferences.send_with_enter;
   const { width, containerRef, onMouseDown } = useResizable();
   const [input, setInput] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
@@ -99,7 +110,7 @@ export default function ChatView() {
     if (attachCanvas) {
       image = (await canvasHandle.current?.exportPng()) ?? null;
       if (!image) {
-        setNotice("Canvas bo‘sh yoki ochilmagan, shuning uchun rasm ilova qilinmadi.");
+        setNotice(t("chat.canvasEmpty"));
       }
     }
     setInput("");
@@ -117,7 +128,7 @@ export default function ChatView() {
           onClick={() => chat.select(null)}
           className="mb-2 flex items-center justify-center gap-2 rounded-md border border-neutral-700 py-2 text-sm hover:bg-neutral-800"
         >
-          <Plus size={14} /> Yangi suhbat
+          <Plus size={14} /> {t("chat.newChat")}
         </button>
         <div className="flex-1 space-y-1 overflow-auto">
           {chat.conversations.map((c) => (
@@ -132,7 +143,7 @@ export default function ChatView() {
               </button>
               <button
                 onClick={() => chat.remove(c.id)}
-                aria-label="O'chirish"
+                aria-label={t("common.delete")}
                 className="hidden text-neutral-500 hover:text-red-400 group-hover:block"
               >
                 <Trash2 size={14} />
@@ -150,17 +161,17 @@ export default function ChatView() {
               onClick={() => openTab("preview")}
               className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
             >
-              <Eye size={14} /> Preview
+              <Eye size={14} /> {t("chat.preview")}
             </button>
             <button
               onClick={() => openTab("canvas")}
               className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
             >
-              <PenTool size={14} /> Canvas
+              <PenTool size={14} /> {t("chat.canvas")}
             </button>
             <button
               onClick={() => setPanelOpen((o) => !o)}
-              aria-label="Panelni ochish/yopish"
+              aria-label={t("chat.togglePanel")}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-800"
             >
               {panelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
@@ -179,7 +190,7 @@ export default function ChatView() {
           {chat.messages.length === 0 && (
             <div className="msg-in mt-20 flex flex-col items-center gap-4 text-neutral-500">
               <OrbitLogo size={64} />
-              <p>Savol yozing — Claude, Deepseek va Gemini bir suhbatda.</p>
+              <p>{t("chat.empty")}</p>
             </div>
           )}
           {(() => {
@@ -206,7 +217,7 @@ export default function ChatView() {
                     style={{ animationDelay: `${Math.min(i * 25, 250)}ms` }}
                   >
                     <div
-                      className={`max-w-[90%] rounded-lg px-4 py-2 ${m.role === "user" ? "bg-blue-600" : "bg-neutral-800"}`}
+                      className={`max-w-[90%] rounded-lg px-4 py-2 ${m.role === "user" ? "bg-blue-600 text-white" : "bg-neutral-800"}`}
                       style={
                         m.role === "assistant"
                           ? { boxShadow: `inset 3px 0 0 ${colorOf(providerOf(m.model))}` }
@@ -218,7 +229,7 @@ export default function ChatView() {
                           {labelOf(m.model)}
                         </div>
                       )}
-                      {m.has_canvas && <div className="mb-1 text-xs text-blue-200">🖼 Canvas rasmi ilova qilindi</div>}
+                      {m.has_canvas && <div className="mb-1 text-xs text-blue-200">{t("chat.canvasAttached")}</div>}
                       {m.role === "user" ? (
                         <p className="whitespace-pre-wrap">{m.content}</p>
                       ) : (
@@ -243,26 +254,26 @@ export default function ChatView() {
         </div>
 
         {(chat.error || notice || visionWarning) && (
-          <div className="mx-4 mb-2 space-y-1 rounded bg-red-950 p-3 text-sm text-red-300">
+          <div className="mx-4 mb-2 space-y-1 rounded bg-red-500/10 p-3 text-sm text-red-500">
             {chat.error && (
               <p>
                 {chat.error}{" "}
                 {chat.error.includes("Settings") && (
                   <Link href="/settings" className="underline">
-                    Settings ga o‘tish
+                    {t("chat.toSettings")}
                   </Link>
                 )}
               </p>
             )}
             {notice && <p>{notice}</p>}
-            {visionWarning && <p>{currentModel?.label} rasmni ko‘ra olmaydi. Claude yoki Gemini ni tanlang.</p>}
+            {visionWarning && <p>{currentModel?.label} {t("chat.noVision")}</p>}
           </div>
         )}
 
         <div className="border-t border-neutral-800 p-3">
           <label className="mb-2 flex w-fit items-center gap-2 text-xs text-neutral-400">
             <input type="checkbox" checked={attachCanvas} onChange={(e) => setAttachCanvas(e.target.checked)} />
-            Canvasni AI ga ko‘rsatish (rasm sifatida ilova qilinadi)
+            {t("chat.attachCanvas")}
           </label>
           <div className="flex gap-2">
             <textarea
@@ -270,28 +281,30 @@ export default function ChatView() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 // isComposing: IME (masalan, emoji/xitoy klaviaturasi) bilan yozayotganda Enter yubormasin
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                // Sozlamaga qarab: Enter yoki Ctrl/⌘+Enter yuboradi
+                const send = sendWithEnter ? !e.shiftKey : e.ctrlKey || e.metaKey;
+                if (e.key === "Enter" && send && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   submit();
                 }
               }}
               rows={2}
-              placeholder="Xabar yozing (Enter — yuborish, Shift+Enter — yangi qator)"
+              placeholder={t(sendWithEnter ? "chat.placeholder" : "chat.placeholderNoEnter")}
               className="flex-1 resize-none rounded-md border border-neutral-700 bg-neutral-950 p-2 text-sm"
             />
             <VoiceButton
-              onText={(t) => setInput((prev) => (prev ? `${prev.trimEnd()} ${t}` : t))}
+              onText={(v) => setInput((prev) => (prev ? `${prev.trimEnd()} ${v}` : v))}
               onError={setNotice}
             />
             {chat.streaming ? (
-              <button onClick={chat.stop} className="rounded-md bg-neutral-700 px-4" aria-label="To'xtatish">
+              <button onClick={chat.stop} className="rounded-md bg-neutral-700 px-4" aria-label={t("chat.stop")}>
                 <Square size={16} />
               </button>
             ) : (
               <button
                 onClick={submit}
-                className="overflow-hidden rounded-md bg-blue-600 px-4 transition-transform hover:bg-blue-500 active:scale-95"
-                aria-label="Yuborish"
+                className="overflow-hidden rounded-md bg-blue-600 text-white px-4 transition-transform hover:bg-blue-500 active:scale-95"
+                aria-label={t("chat.send")}
               >
                 <Send key={fly} size={16} className={fly ? "fly" : ""} />
               </button>
@@ -306,7 +319,7 @@ export default function ChatView() {
             onMouseDown={onMouseDown}
             role="separator"
             aria-orientation="vertical"
-            className="w-1 shrink-0 cursor-col-resize bg-neutral-800 hover:bg-blue-600"
+            className="w-1 shrink-0 cursor-col-resize bg-neutral-800 hover:bg-blue-600 text-white"
           />
           <div style={{ width }} className="relative shrink-0 bg-neutral-950">
             <div className={`absolute inset-0 ${tab === "preview" ? "" : "invisible pointer-events-none"}`}>

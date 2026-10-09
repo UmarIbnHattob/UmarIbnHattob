@@ -29,6 +29,11 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     # Login qo'shilishidan oldingi standart foydalanuvchida parol yo'q (None)
     password_hash: Mapped[str | None] = mapped_column(String(255))
+    display_name: Mapped[str | None] = mapped_column(String(100))
+    nickname: Mapped[str | None] = mapped_column(String(60))  # AI foydalanuvchini qanday chaqirsin
+    preferences: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Oshirilsa, barcha eski sessiyalar (tokenlar) bekor bo'ladi: "barcha qurilmalardan chiqish"
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -108,3 +113,18 @@ class UsageCounter(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     month: Mapped[str] = mapped_column(String(7), primary_key=True)  # "2026-10"
     requests: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class UsageEvent(Base):
+    """Har bir AI so'rovi (statistika uchun): qaysi provayder/model, qanday ish."""
+
+    __tablename__ = "usage_events"
+    __table_args__ = (Index("ix_usage_events_user_created", "user_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20))  # chat | agent | image | voice
+    provider: Mapped[str] = mapped_column(String(20))
+    model: Mapped[str] = mapped_column(String(100))
+    platform_key: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

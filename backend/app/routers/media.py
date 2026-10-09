@@ -11,7 +11,8 @@ from app.deps import get_current_user
 from app.models import MediaItem, Provider, User
 from app.providers import gemini_image
 from app.providers.base import ProviderError
-from app.quota import resolve_key
+from app.quota import resolve_key_info
+from app.usage_log import record
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -58,7 +59,8 @@ def list_media(db: Session = Depends(get_db), user: User = Depends(get_current_u
 async def create_image(body: ImageIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if body.model not in {m["id"] for m in gemini_image.IMAGE_MODELS}:
         raise HTTPException(400, f"Noma'lum model: {body.model}")
-    api_key = resolve_key(db, user, Provider.gemini)
+    api_key, platform = resolve_key_info(db, user, Provider.gemini)
+    record(user.id, "image", "gemini", body.model, platform)
 
     # Rasm yaratish 1-2 daqiqa olishi mumkin: shu vaqtda baza ulanishini band qilib turmaymiz
     user_id = user.id

@@ -39,19 +39,20 @@ def verify_password(password: str, stored: str | None) -> bool:
         return False
 
 
-def create_token(user_id: str) -> str:
+def create_token(user_id: str, version: int = 0) -> str:
     if not settings.secret_key:
         raise RuntimeError("SECRET_KEY .env faylida sozlanmagan")
     exp = int(time.time()) + settings.session_days * 86400
-    return jwt.encode({"sub": user_id, "exp": exp}, settings.secret_key, algorithm="HS256")
+    return jwt.encode({"sub": user_id, "tv": version, "exp": exp}, settings.secret_key, algorithm="HS256")
 
 
-def read_token(token: str) -> str | None:
-    """Token to'g'ri va muddati o'tmagan bo'lsa user_id, aks holda None."""
+def read_token(token: str) -> tuple[str, int] | None:
+    """Token to'g'ri va muddati o'tmagan bo'lsa (user_id, token_version), aks holda None."""
     if not settings.secret_key:
         return None
     try:
-        return jwt.decode(token, settings.secret_key, algorithms=["HS256"]).get("sub")
+        data = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        return (data["sub"], int(data.get("tv", 0))) if data.get("sub") else None
     except jwt.PyJWTError:
         return None
 

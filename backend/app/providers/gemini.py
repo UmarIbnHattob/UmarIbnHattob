@@ -8,7 +8,7 @@ from app.providers.base import TIMEOUT, TRUNCATED_NOTE, ProviderError, friendly_
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
-async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIterator[str]:
+async def stream_chat(api_key: str, model: str, messages: list[dict], system: str | None = None) -> AsyncIterator[str]:
     url = f"{BASE}/{model}:streamGenerateContent?alt=sse"
     headers = {"x-goog-api-key": api_key}
     # Gemini da assistant roli "model" deb ataladi
@@ -20,7 +20,10 @@ async def stream_chat(api_key: str, model: str, messages: list[dict]) -> AsyncIt
         contents.append({"role": "model" if m["role"] == "assistant" else "user", "parts": parts})
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            async with client.stream("POST", url, headers=headers, json={"contents": contents}) as r:
+            body = {"contents": contents}
+            if system:
+                body["systemInstruction"] = {"parts": [{"text": system}]}
+            async with client.stream("POST", url, headers=headers, json=body) as r:
                 if r.status_code != 200:
                     raise friendly_http_error(r.status_code, (await r.aread()).decode(errors="ignore"))
                 async for ev in iter_sse_data(r):

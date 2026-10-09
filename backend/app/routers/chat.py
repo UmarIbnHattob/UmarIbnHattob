@@ -20,7 +20,9 @@ from app.deps import get_current_user
 from app.models import Conversation, Message, Role, User
 from app.providers.base import ProviderError, merge_history, trim_history
 from app.providers.registry import MODELS, STREAMERS, find_model
-from app.quota import resolve_key
+from app.personalize import system_prompt
+from app.quota import resolve_key_info
+from app.usage_log import record
 from app.schemas import ConversationOut, MessageOut, ModelOut, SendMessageIn
 
 router = APIRouter(tags=["chat"])
@@ -109,7 +111,9 @@ async def send_message(
 
     conv = _own_conversation(db, user, conv_id)
     # Oqim boshlanishidan OLDIN: kalit yo'q yoki limit tugagan bo'lsa oddiy 400/429 qaytadi
-    api_key = resolve_key(db, user, model["provider"])
+    api_key, platform = resolve_key_info(db, user, model["provider"])
+    system = system_prompt(user)
+    record(user.id, "chat", model["provider"].value, model["id"], platform)
     db.add(
         Message(
             conversation_id=conv.id,
@@ -147,7 +151,7 @@ async def send_message(
         try:
             error = None
             try:
-                async for chunk in STREAMERS[model["provider"]](api_key, model_id, history):
+                async for chunk in STREAMERS[model["provider"]](api_key, model_id, history, system=system):
                     parts.append(chunk)
                     yield _sse({"type": "delta", "text": chunk})
                 if not parts:

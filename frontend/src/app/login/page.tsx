@@ -3,10 +3,13 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import * as authApi from "@/lib/authApi";
+import { patchMe } from "@/lib/me";
 import OrbitLogo from "@/components/OrbitLogo";
+import { LANGS, useI18n } from "@/lib/i18n";
 
 /** Kirish / ro'yxatdan o'tish formasi. */
 export default function LoginPage() {
+  const { t, lang, setLang } = useI18n();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,6 +22,8 @@ export default function LoginPage() {
     setError(null);
     try {
       await (mode === "login" ? authApi.login : authApi.register)(email.trim(), password);
+      // Yangi hisob: login sahifasida tanlangan tilni profilga yozamiz
+      if (mode === "register") await patchMe({ preferences: { language: lang } }).catch(() => {});
       // To'liq yuklash: AuthGate foydalanuvchini yangi cookie bilan qayta o'qiydi
       window.location.assign("/chat");
     } catch (err) {
@@ -29,7 +34,7 @@ export default function LoginPage() {
 
   // FastAPI tekshiruv xatolari (422) inglizcha keladi: tushunarli qilamiz
   function friendly(msg: string) {
-    if (msg.includes("Server xatosi (422)")) return "Email to‘g‘ri emas yoki parol 8 belgidan qisqa.";
+    if (msg.includes("Server xatosi (422)")) return t("login.invalid");
     return msg;
   }
 
@@ -48,7 +53,7 @@ export default function LoginPage() {
           <OrbitLogo size={72} />
           <h1 className="text-xl font-semibold">OmniAI Workspace</h1>
         </div>
-        <p className="text-center text-sm text-neutral-400">{mode === "login" ? "Hisobingizga kiring" : "Yangi hisob yarating"}</p>
+        <p className="text-center text-sm text-neutral-400">{mode === "login" ? t("login.signIn") : t("login.signUp")}</p>
 
         <input
           type="email"
@@ -64,20 +69,20 @@ export default function LoginPage() {
           required
           minLength={8}
           autoComplete={mode === "login" ? "current-password" : "new-password"}
-          placeholder="Parol (kamida 8 belgi)"
+          placeholder={t("login.password")}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
         />
 
-        {error && <p className="rounded bg-red-950 p-2 text-sm text-red-300">{error}</p>}
+        {error && <p className="rounded bg-red-500/10 p-2 text-sm text-red-500">{error}</p>}
 
         <button
           disabled={busy}
-          className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 py-2 text-sm hover:bg-blue-500 disabled:opacity-60"
+          className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 text-white py-2 text-sm hover:bg-blue-500 disabled:opacity-60"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
-          {mode === "login" ? "Kirish" : "Ro‘yxatdan o‘tish"}
+          {mode === "login" ? t("login.submitIn") : t("login.submitUp")}
         </button>
 
         <button
@@ -86,10 +91,24 @@ export default function LoginPage() {
             setMode(mode === "login" ? "register" : "login");
             setError(null);
           }}
-          className="w-full text-center text-sm text-neutral-400 hover:text-white"
+          className="w-full text-center text-sm text-neutral-400 hover:text-neutral-50"
         >
-          {mode === "login" ? "Hisobingiz yo‘qmi? Ro‘yxatdan o‘ting" : "Hisobingiz bormi? Kiring"}
+          {mode === "login" ? t("login.toSignUp") : t("login.toSignIn")}
         </button>
+
+        {/* Til tanlash: kirishdan oldin ham */}
+        <div className="flex justify-center gap-1 pt-1">
+          {LANGS.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => setLang(l.id)}
+              className={`rounded-md px-2 py-1 text-xs transition ${lang === l.id ? "bg-neutral-800 text-neutral-50" : "text-neutral-500 hover:text-neutral-200"}`}
+            >
+              {l.flag} {l.id.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </form>
     </div>
   );

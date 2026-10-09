@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { getDesktop } from "@/lib/desktop";
+import { useI18n } from "@/lib/i18n";
 
 const MAX_STEPS = 30;
 
@@ -36,6 +37,7 @@ const nid = () => `i${++seq}`;
 
 /** Agent sikli: model -> asbob chaqiruvlari (kompyuterda bajariladi) -> natijalar -> model ... */
 export function useAgent(model: string, folder: string | null) {
+  const { t } = useI18n();
   const [items, setItems] = useState<AgentItem[]>([]);
   const [running, setRunning] = useState(false);
   const messages = useRef<AgentMessage[]>([]);
@@ -65,11 +67,11 @@ export function useAgent(model: string, folder: string | null) {
       try {
         for (let step = 0; ; step++) {
           if (stopRef.current) {
-            push({ kind: "note", id: nid(), text: "To‘xtatildi.", tone: "info" });
+            push({ kind: "note", id: nid(), text: t("agent.stopped"), tone: "info" });
             break;
           }
           if (step >= MAX_STEPS) {
-            push({ kind: "note", id: nid(), text: `${MAX_STEPS} qadam chegarasiga yetildi. "Davom et" deb yozing.`, tone: "info" });
+            push({ kind: "note", id: nid(), text: t("agent.maxSteps", { n: MAX_STEPS }), tone: "info" });
             break;
           }
           const res = await apiFetch<StepResponse>("/agent/step", {
@@ -100,7 +102,7 @@ export function useAgent(model: string, folder: string | null) {
         setRunning(false);
       }
     },
-    [model, folder, running],
+    [model, folder, running, t],
   );
 
   return { items, running, run, stop, reset, started: items.length > 0 };

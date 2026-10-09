@@ -42,8 +42,8 @@ def fake_llm(monkeypatch):
     """Haqiqiy API o'rniga: kelgan tarixni yozib oladi va 'Salom dunyo' qaytaradi."""
     calls = []
 
-    async def fake(api_key, model, messages):
-        calls.append({"key": api_key, "model": model, "messages": messages})
+    async def fake(api_key, model, messages, system=None):
+        calls.append({"key": api_key, "model": model, "messages": messages, "system": system})
         for w in ["Salom ", "dunyo"]:
             yield w
 

@@ -12,7 +12,9 @@ from app.deps import get_current_user
 from app.models import User
 from app.providers.base import ProviderError
 from app.providers.registry import AGENT_MODELS, find_model
-from app.quota import resolve_key
+from app.personalize import system_prompt
+from app.quota import resolve_key_info
+from app.usage_log import record
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -53,10 +55,14 @@ async def agent_step(body: StepIn, db: Session = Depends(get_db), user: User = D
         if m["role"] == "tool_results" and not m.get("results"):
             raise HTTPException(400, "tool_results bo'sh")
 
-    api_key = resolve_key(db, user, model["provider"])
+    api_key, platform = resolve_key_info(db, user, model["provider"])
+    personal = system_prompt(user)
+    record(user.id, "agent", provider, model["id"], platform)
     db.close()  # model 1-5 daqiqa o'ylashi mumkin: ulanishni band qilmaymiz
 
     system = SYSTEM_PROMPT.format(folder=body.folder.replace("\n", " "))
+    if personal:
+        system += "\n\n" + personal
     try:
         res = await STEPPERS[provider](api_key, model["id"], system, msgs)
     except ProviderError as exc:

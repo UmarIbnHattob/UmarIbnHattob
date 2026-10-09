@@ -25,7 +25,7 @@ class UserOut(BaseModel):
 
 def _set_cookie(response: Response, user: User) -> None:
     try:
-        token = create_token(str(user.id))
+        token = create_token(str(user.id), user.token_version)
     except RuntimeError as exc:
         raise HTTPException(500, str(exc))
     response.set_cookie(
