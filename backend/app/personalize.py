@@ -16,6 +16,7 @@ class Preferences(BaseModel):
     custom_instructions: str = Field(default="", max_length=3000)
     font_size: Literal["sm", "md", "lg"] = "md"
     send_with_enter: bool = True
+    voice_auto_send: bool = True  # ovoz matnga aylangach darhol yuborilsin
     avatar_color: str = Field(default="#7c3aed", pattern=r"^#[0-9a-fA-F]{6}$")
 
 

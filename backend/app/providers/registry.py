@@ -20,11 +20,3 @@ STREAMERS = {
 
 def find_model(model_id: str) -> dict | None:
     return next((m for m in MODELS if m["id"] == model_id), None)
-
-
-# Agent rejimi (asbob chaqiruvi) uchun yaroqli modellar
-AGENT_MODELS = [
-    {"id": m["id"], "label": m["label"], "provider": m["provider"]}
-    for m in MODELS
-    if m["id"] in {"claude-sonnet-5-5", "claude-opus-5-5", "deepseek-chat", "gemini-2.5-pro", "gemini-2.5-flash"}
-]

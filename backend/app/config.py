@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     platform_gemini_key: str = ""
     # Platforma kaliti bilan har bir foydalanuvchiga oyiga beriladigan bepul so'rovlar soni
     free_monthly_requests: int = 100
+    # Custom provayderlarda lokal/ichki manzillarga (Ollama, LM Studio) ruxsat.
+    # Faqat o'z kompyuteringizda yoki ishonchli serverda true qiling (aks holda SSRF xavfi).
+    allow_local_providers: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

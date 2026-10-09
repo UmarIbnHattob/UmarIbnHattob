@@ -15,6 +15,7 @@ import anthropic
 import httpx
 
 from app.agent.tools import TOOLS
+from app.providers import deepseek, openai_compat
 from app.providers.anthropic import client_for, friendly_sdk_error
 from app.providers.base import ProviderError, friendly_http_error
 
@@ -74,55 +75,18 @@ async def step_anthropic(api_key: str, model: str, system: str, messages: list[d
     return StepResult(raw=raw, text=text, tool_calls=calls)
 
 
-# ---------------------------------------------------------------- Deepseek (OpenAI-mos)
+# ---------------------------------------------------------------- OpenAI-mos (Deepseek, OpenRouter, Groq, Ollama…)
 
-def _openai_messages(system: str, messages: list[dict]) -> list[dict]:
-    out = [{"role": "system", "content": system}]
-    for m in messages:
-        if m["role"] == "user":
-            out.append({"role": "user", "content": m["content"]})
-        elif m["role"] == "assistant":
-            out.append(m["raw"])
-        else:
-            out += [{"role": "tool", "tool_call_id": r["id"], "content": r["output"]} for r in m["results"]]
-    return out
+_openai_messages = openai_compat.agent_messages
+
+
+async def step_openai(base_url: str, api_key: str | None, model: str, system: str, messages: list[dict], label: str = "Model") -> StepResult:
+    raw, text, calls, truncated = await openai_compat.step(base_url, api_key, model, system, messages, TOOLS, label)
+    return StepResult(raw=raw, text=text, tool_calls=[] if truncated else calls, note=TRUNCATED if truncated else None)
 
 
 async def step_deepseek(api_key: str, model: str, system: str, messages: list[dict]) -> StepResult:
-    body = {
-        "model": model,
-        "max_tokens": 8192,
-        "messages": _openai_messages(system, messages),
-        "tools": [
-            {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["schema"]}}
-            for t in TOOLS
-        ],
-    }
-    try:
-        async with httpx.AsyncClient(timeout=AGENT_TIMEOUT) as client:
-            r = await client.post(
-                "https://api.deepseek.com/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=body
-            )
-    except httpx.TimeoutException:
-        raise ProviderError("Deepseek javob bermadi (vaqt tugadi).")
-    except httpx.HTTPError as exc:
-        raise ProviderError(f"Deepseek bilan ulanishda xato: {exc.__class__.__name__}")
-    if r.status_code != 200:
-        raise friendly_http_error(r.status_code, r.text)
-    choice = r.json()["choices"][0]
-    msg = choice["message"]
-    raw = {"role": "assistant", "content": msg.get("content") or ""}
-    if msg.get("tool_calls"):
-        raw["tool_calls"] = msg["tool_calls"]
-    calls = []
-    for tc in msg.get("tool_calls") or []:
-        try:
-            args = json.loads(tc["function"].get("arguments") or "{}")
-        except json.JSONDecodeError:
-            args = {"__invalid_json__": tc["function"].get("arguments")}
-        calls.append({"id": tc["id"], "name": tc["function"]["name"], "args": args})
-    note = TRUNCATED if choice.get("finish_reason") == "length" else None
-    return StepResult(raw=raw, text=msg.get("content") or "", tool_calls=[] if note else calls, note=note)
+    return await step_openai(deepseek.BASE_URL, api_key, model, system, messages, "Deepseek")
 
 
 # ---------------------------------------------------------------- Gemini

@@ -58,6 +58,51 @@ TOOLS = [
         },
     },
     {
+        "name": "update_plan",
+        "description": "Show the user a live task checklist. Call at the start of multi-step work and whenever a step's status changes. Send the FULL list each time.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "done"]},
+                        },
+                        "required": ["title", "status"],
+                    },
+                }
+            },
+            "required": ["steps"],
+        },
+    },
+    {
+        "name": "generate_image",
+        "description": "Generate an image (hero banner, illustration, icon, background) with an image model and save it as a PNG file in the project. Use for website visuals instead of external image URLs.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Detailed visual description in English: subject, style, colors, composition."},
+                "path": {"type": "string", "description": "Relative path to save, e.g. assets/hero.png"},
+            },
+            "required": ["prompt", "path"],
+        },
+    },
+    {
+        "name": "ask_expert",
+        "description": "Ask a different AI model for expert advice and get its answer as text. expertise: 'design' (UI/UX, colors, layout, copywriting), 'code' (implementation, code review), 'reasoning' (architecture, tricky logic).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "Self-contained question with all needed context (the expert cannot see the files)."},
+                "expertise": {"type": "string", "enum": ["design", "code", "reasoning"]},
+            },
+            "required": ["question", "expertise"],
+        },
+    },
+    {
         "name": "run_command",
         "description": "Loyiha papkasida terminal buyrug'ini ishga tushiradi (masalan testlar). Foydalanuvchi ruxsat berishi kerak.",
         "schema": {
@@ -77,4 +122,15 @@ Work like a careful senior engineer:
 - The user approves every write and command in a dialog. If a tool result says the user declined, do not retry the same action; explain or ask instead.
 - Run tests or the build with run_command when it helps verify your change.
 - Keep the user informed with short notes between steps, and finish with a brief summary of what you changed.
+- For multi-step work, call update_plan first and keep it updated.
+- You can use generate_image for visuals and ask_expert to consult another model (e.g. design advice, a second opinion on code).
+
+When the user asks to build a website or app, follow this workflow (adapt as needed):
+1. update_plan: requirements → structure/skeleton → design → visuals → code → preview → publish.
+2. Clarify only if something essential is missing; otherwise make sensible choices and state them.
+3. Create the file skeleton (index.html, styles.css, script.js, assets/).
+4. ask_expert(design): palette, typography, layout, section copy. Then generate_image for the hero and key visuals into assets/.
+5. Write clean, responsive, accessible code. Prefer a single self-contained page unless the user asked for more.
+6. Tell the user to press "Open" on the HTML file card to preview it.
+7. Publishing: explain options (Netlify Drop, Vercel, GitHub Pages). Only run a deploy command (e.g. `npx vercel --prod`) if the user agrees; it needs their account.
 Reply in the language the user writes in (often Uzbek)."""

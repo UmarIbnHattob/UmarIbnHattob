@@ -1,39 +1,11 @@
-"""Deepseek (OpenAI-mos Chat Completions API) — oqimli javob."""
+"""Deepseek — OpenAI-mos API (umumiy kod: openai_compat)."""
 from collections.abc import AsyncIterator
 
-import httpx
+from app.providers import openai_compat
 
-from app.providers.base import MAX_OUTPUT_TOKENS, TIMEOUT, TRUNCATED_NOTE, ProviderError, friendly_http_error, iter_sse_data
-
-URL = "https://api.deepseek.com/chat/completions"
+BASE_URL = "https://api.deepseek.com"
 
 
 async def stream_chat(api_key: str, model: str, messages: list[dict], system: str | None = None) -> AsyncIterator[str]:
-    headers = {"Authorization": f"Bearer {api_key}"}
-    body = {
-        "model": model,
-        "stream": True,
-        "max_tokens": MAX_OUTPUT_TOKENS,
-        "messages": ([{"role": "system", "content": system}] if system else [])
-        + [{"role": m["role"], "content": m["content"]} for m in messages],
-    }
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            async with client.stream("POST", URL, headers=headers, json=body) as r:
-                if r.status_code != 200:
-                    raise friendly_http_error(r.status_code, (await r.aread()).decode(errors="ignore"))
-                async for ev in iter_sse_data(r):
-                    if not isinstance(ev, dict):
-                        continue
-                    choices = ev.get("choices") or []
-                    if not choices:
-                        continue
-                    text = choices[0].get("delta", {}).get("content")
-                    if text:
-                        yield text
-                    if choices[0].get("finish_reason") == "length":
-                        yield TRUNCATED_NOTE
-    except httpx.TimeoutException:
-        raise ProviderError("Deepseek javob bermadi (vaqt tugadi). Qayta urinib ko'ring.")
-    except httpx.HTTPError as exc:
-        raise ProviderError(f"Deepseek bilan ulanishda xato: {exc.__class__.__name__}")
+    async for chunk in openai_compat.stream_chat(BASE_URL, api_key, model, messages, system, label="Deepseek"):
+        yield chunk

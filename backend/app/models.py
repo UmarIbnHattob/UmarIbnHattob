@@ -128,3 +128,18 @@ class UsageEvent(Base):
     model: Mapped[str] = mapped_column(String(100))
     platform_key: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CustomProvider(Base):
+    """Foydalanuvchi qo'shgan OpenAI-mos provayder (OpenRouter, Groq, OpenAI, Ollama, ...)."""
+
+    __tablename__ = "custom_providers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # openrouter | openai | groq | mistral | xai | together | ollama | lmstudio | custom
+    name: Mapped[str] = mapped_column(String(60))
+    base_url: Mapped[str] = mapped_column(String(300))
+    encrypted_key: Mapped[str | None] = mapped_column(Text)
+    models: Mapped[list] = mapped_column(JSONB, default=list)  # [{id, label, vision, tools, free}]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
