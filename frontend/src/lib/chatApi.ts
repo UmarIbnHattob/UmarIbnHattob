@@ -1,9 +1,19 @@
 /** Chat API chaqiruvlari va SSE oqimini o'qish. */
 import { apiFetch, request } from "@/lib/api";
 
-export type ModelInfo = { id: string; label: string; provider: string; vision: boolean };
+export type ModelInfo = {
+  id: string;
+  label: string;
+  provider: string;
+  vision: boolean;
+  tools?: boolean;
+  group?: string;
+  source?: "builtin" | "custom";
+  available?: boolean;
+  free?: boolean;
+};
 export type Conversation = { id: string; title: string; updated_at: string };
-export type ChatMessage = { id: string; role: "user" | "assistant"; content: string; model: string | null; has_canvas?: boolean };
+export type ChatMessage = { id: string; role: "user" | "assistant"; content: string; model: string | null; has_canvas?: boolean; route?: string };
 
 export const getModels = () => apiFetch<ModelInfo[]>("/models");
 export const getConversations = () => apiFetch<Conversation[]>("/conversations");
@@ -19,6 +29,7 @@ export async function streamMessage(
   image: string | null,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  onRoute?: (model: string, label: string, reason: string) => void,
 ): Promise<void> {
   // Server xatosi (kalit yo'q va h.k.) bo'lsa RequestError tashlanadi: xabar saqlanmagan bo'ladi
   const res = await request(`/conversations/${convId}/messages`, {
@@ -41,6 +52,7 @@ export async function streamMessage(
       if (!ev.startsWith("data:")) continue;
       const data = JSON.parse(ev.slice(5));
       if (data.type === "delta") onDelta(data.text);
+      else if (data.type === "route") onRoute?.(data.model, data.label, data.reason);
       else if (data.type === "error") throw new Error(data.message);
     }
   }

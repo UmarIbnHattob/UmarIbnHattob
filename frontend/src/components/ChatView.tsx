@@ -117,7 +117,7 @@ export default function ChatView() {
     chat.send(text, image);
   }
 
-  const labelOf = (id: string | null) => chat.models.find((m) => m.id === id)?.label ?? id;
+  const labelOf = (id: string | null) => (id === "auto" ? "Auto" : (chat.models.find((m) => m.id === id)?.label ?? id?.split(":").pop() ?? id));
   const providerOf = (id: string | null) => chat.models.find((m) => m.id === id)?.provider;
   const visionWarning = attachCanvas && currentModel && !currentModel.vision;
 
@@ -195,19 +195,26 @@ export default function ChatView() {
           )}
           {(() => {
             let lastModel: string | null = null;
+            let lastName = "";
+            // Auto yo'nalishi bo'lsa — uning chiroyli nomi, aks holda katalogdagi nom
+            const nameOf = (x: (typeof chat.messages)[number]) => x.route?.split(" · ")[0] ?? labelOf(x.model) ?? "";
             return chat.messages.map((m, i) => {
               const isLast = i === chat.messages.length - 1;
               const live = chat.streaming && isLast && m.role === "assistant";
               // Oldingi assistant javobining modeli bilan solishtiramiz: almashgan bo'lsa "handoff" chizig'i chiqadi
               const prevModel = m.role === "assistant" ? lastModel : null;
-              if (m.role === "assistant") lastModel = m.model;
+              const prevName = lastName;
+              if (m.role === "assistant") {
+                lastModel = m.model;
+                lastName = nameOf(m);
+              }
               const switched = !!prevModel && !!m.model && prevModel !== m.model;
               return (
                 <Fragment key={m.id}>
                   {switched && (
                     <Handoff
-                      from={labelOf(prevModel) ?? ""}
-                      to={labelOf(m.model) ?? ""}
+                      from={prevName}
+                      to={nameOf(m)}
                       fromColor={colorOf(providerOf(prevModel))}
                       toColor={colorOf(providerOf(m.model))}
                     />
@@ -226,7 +233,13 @@ export default function ChatView() {
                     >
                       {m.role === "assistant" && (
                         <div className="mb-1 text-xs" style={{ color: colorOf(providerOf(m.model)) }}>
-                          {labelOf(m.model)}
+                          {m.route ? (
+                            <span className="fade-swap">
+                              <span className="text-violet-400">Auto →</span> {m.route}
+                            </span>
+                          ) : (
+                            labelOf(m.model)
+                          )}
                         </div>
                       )}
                       {m.has_canvas && <div className="mb-1 text-xs text-blue-200">{t("chat.canvasAttached")}</div>}
@@ -293,7 +306,17 @@ export default function ChatView() {
               className="flex-1 resize-none rounded-md border border-neutral-700 bg-neutral-950 p-2 text-sm"
             />
             <VoiceButton
-              onText={(v) => setInput((prev) => (prev ? `${prev.trimEnd()} ${v}` : v))}
+              onText={(v) => {
+                // Sozlamaga qarab: ovoz matni darhol yuboriladi yoki kiritish maydoniga qo'shiladi
+                if (me.preferences.voice_auto_send && !chat.streaming) {
+                  const text = input.trim() ? `${input.trimEnd()} ${v}` : v;
+                  setInput("");
+                  setFly((n) => n + 1);
+                  chat.send(text);
+                } else {
+                  setInput((prev) => (prev ? `${prev.trimEnd()} ${v}` : v));
+                }
+              }}
               onError={setNotice}
             />
             {chat.streaming ? (

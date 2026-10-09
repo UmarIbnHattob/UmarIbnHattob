@@ -162,6 +162,74 @@ ipcMain.handle("omni:open", async (event, rel) => {
   }
 });
 
+// generate_image asbobi: server yaratgan rasmni papkaga saqlash (ruxsat bilan, faqat rasm formatlari)
+const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
+ipcMain.handle("omni:saveImage", async (event, rel, b64) => {
+  if (!trusted(event)) throw new Error("Ruxsat yo'q");
+  const s = state.get(event.sender.id);
+  if (!s?.root) return { output: "Avval papka tanlang.", isError: true };
+  try {
+    const abs = resolveInside(s.root, String(rel));
+    if (!IMAGE_EXT.has(path.extname(abs).toLowerCase())) return { output: "Faqat .png/.jpg/.webp rasm saqlanadi.", isError: true };
+    const data = Buffer.from(String(b64), "base64");
+    if (data.length > 15 * 1024 * 1024) return { output: "Rasm juda katta.", isError: true };
+    if (!s.autoApprove.has("save_image")) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const res = await dialog.showMessageBox(win, {
+        type: "question",
+        title: "AI ruxsat so'rayapti",
+        message: `Rasm saqlash: ${rel}`,
+        detail: `Papka: ${s.root}\n\n${(data.length / 1024).toFixed(0)} KB rasm (AI yaratgan)`,
+        buttons: ["Ruxsat berish", "Rad etish"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        checkboxLabel: "Bu papkada rasmlar uchun qayta so'rama",
+      });
+      if (res.response !== 0) return { output: "Foydalanuvchi rasmni saqlashni rad etdi.", isError: true };
+      if (res.checkboxChecked) s.autoApprove.add("save_image");
+    }
+    await require("node:fs/promises").mkdir(path.dirname(abs), { recursive: true });
+    await require("node:fs/promises").writeFile(abs, data);
+    return { output: `Rasm saqlandi: ${rel} (${(data.length / 1024).toFixed(0)} KB)`, isError: false };
+  } catch (e) {
+    return { output: e.message, isError: true };
+  }
+});
+
+// Papkada tizim terminalini ochish (foydalanuvchi u yerda o'zi buyruq yozadi, masalan rasmiy "claude" CLI)
+const { spawn, spawnSync } = require("node:child_process");
+
+function openTerminal(cwd) {
+  const run = (cmd, args = []) => {
+    const child = spawn(cmd, args, { cwd, detached: true, stdio: "ignore" });
+    child.unref();
+  };
+  if (process.platform === "darwin") return run("open", ["-a", "Terminal", cwd]);
+  if (process.platform === "win32") return run("cmd.exe", ["/c", "start", "cmd.exe"]);
+  const candidates = [
+    ["x-terminal-emulator", []], ["qterminal", []], ["gnome-terminal", [`--working-directory=${cwd}`]],
+    ["konsole", ["--workdir", cwd]], ["xfce4-terminal", [`--working-directory=${cwd}`]], ["kitty", []], ["alacritty", []], ["xterm", []],
+  ];
+  for (const [cmd, args] of candidates) {
+    if (spawnSync("which", [cmd]).status === 0) return run(cmd, args);
+  }
+  throw new Error("Terminal dasturi topilmadi");
+}
+
+ipcMain.handle("omni:openTerminal", async (event) => {
+  if (!trusted(event)) throw new Error("Ruxsat yo'q");
+  const s = state.get(event.sender.id);
+  if (!s?.root) return { ok: false, error: "Avval papka tanlang" };
+  try {
+    openTerminal(s.root);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // Faylni fayl menejerida belgilangan holda ko'rsatish (har qanday tur uchun xavfsiz: hech narsa ishga tushmaydi)
 ipcMain.handle("omni:reveal", async (event, rel) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");

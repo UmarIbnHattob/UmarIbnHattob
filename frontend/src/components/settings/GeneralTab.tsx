@@ -135,6 +135,9 @@ export default function GeneralTab() {
         <Row label={t("settings.sendWithEnter")}>
           <Toggle checked={me.preferences.send_with_enter} onChange={(v) => pref({ send_with_enter: v })} label={t("settings.sendWithEnter")} />
         </Row>
+        <Row label={t("settings.voiceAutoSend")}>
+          <Toggle checked={me.preferences.voice_auto_send} onChange={(v) => pref({ voice_auto_send: v })} label={t("settings.voiceAutoSend")} />
+        </Row>
       </Section>
     </>
   );

@@ -11,6 +11,7 @@ export type Preferences = {
   custom_instructions: string;
   font_size: "sm" | "md" | "lg";
   send_with_enter: boolean;
+  voice_auto_send: boolean;
   avatar_color: string;
 };
 export type Me = {

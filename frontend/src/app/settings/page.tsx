@@ -2,12 +2,13 @@
 
 import { Suspense, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BarChart3, Brain, Keyboard, KeyRound, Laptop, Shield, SlidersHorizontal, UserRound } from "lucide-react";
+import { BarChart3, Boxes, Brain, Keyboard, KeyRound, Laptop, Shield, SlidersHorizontal, UserRound } from "lucide-react";
 import { useI18n, type TKey } from "@/lib/i18n";
 import { ToastProvider } from "@/components/settings/ui";
 import GeneralTab from "@/components/settings/GeneralTab";
 import AiTab from "@/components/settings/AiTab";
 import KeysTab from "@/components/settings/KeysTab";
+import ProvidersTab from "@/components/settings/ProvidersTab";
 import UsageTab from "@/components/settings/UsageTab";
 import AccountTab from "@/components/settings/AccountTab";
 import PrivacyTab from "@/components/settings/PrivacyTab";
@@ -18,6 +19,7 @@ const TABS = [
   { id: "general", icon: SlidersHorizontal, label: "settings.tab.general", Comp: GeneralTab },
   { id: "ai", icon: Brain, label: "settings.tab.ai", Comp: AiTab },
   { id: "keys", icon: KeyRound, label: "settings.tab.keys", Comp: KeysTab },
+  { id: "providers", icon: Boxes, label: "settings.tab.providers", Comp: ProvidersTab },
   { id: "usage", icon: BarChart3, label: "settings.tab.usage", Comp: UsageTab },
   { id: "account", icon: UserRound, label: "settings.tab.account", Comp: AccountTab },
   { id: "privacy", icon: Shield, label: "settings.tab.privacy", Comp: PrivacyTab },

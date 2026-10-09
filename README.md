@@ -96,3 +96,17 @@ Run workflow (server manzilini kiriting). Tayyor fayllar workflow artefaktlarida
 
 Chat va Agent'da mikrofon tugmasi: gapiring, to'xtating — matn kiritish maydoniga tushadi (o'zbek, rus, ingliz).
 Ovoz brauzerda 16 kHz WAV ga aylantiriladi va Gemini orqali matnga o'giriladi (Gemini kaliti yoki platforma kaliti kerak).
+
+## 100+ model, lokal modellar va Auto rejim
+
+- **Sozlamalar → Modellar**: OpenRouter (bitta kalit bilan 300+ model, `:free` modellar bepul), Groq, OpenAI, Mistral,
+  xAI, Together yoki istalgan OpenAI-mos manzil.
+- **Lokal modellar (bepul, internetsiz)**: [Ollama](https://ollama.com) → `ollama pull llama3.2` → Sozlamalar → Modellar → Ollama.
+  Backend `.env` da `ALLOW_LOCAL_PROVIDERS=true` bo'lishi kerak (faqat o'z kompyuteringizda — serverda SSRF xavfi).
+- **Auto** (standart): har bir xabar uchun modelni o'zi tanlaydi — kod → Claude/Deepseek, rasm chizish → Gemini (rasm chatda
+  ko'rinadi), rasmni tushunish → Claude/Gemini, oddiy savol → tez model. Tanlov javob ustida ko'rsatiladi.
+- **Agent → 🌐 Sayt yaratish**: reja → tuzilma → boshqa modeldan dizayn maslahati → rasmlar (`generate_image`) → kod →
+  ko'rish → e'lon qilish yo'llari. Har bir fayl va rasm uchun ruxsat so'raladi.
+- **Ovoz**: Gemini kaliti (bepul) yoki Groq/OpenAI (Whisper). Matnga aylangach avtomatik yuboriladi (sozlamada o'chirsa bo'ladi).
+- **Obunalar**: ilova ichida ishlatilmaydi (provayder qoidalari). Desktopda "Terminalda ochish" → `claude` deb yozing —
+  rasmiy Claude Code sizning obunangiz bilan ishlaydi.

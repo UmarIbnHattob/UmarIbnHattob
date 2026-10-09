@@ -37,8 +37,8 @@ export function useChat(defaultModel: string | null = null) {
           /* localStorage bloklangan bo'lishi mumkin */
         }
         // Sozlamalardagi standart model > shu brauzerda oxirgi tanlangan > ro'yxatdagi birinchisi
-        const pick = [defaultModel, saved].find((id) => id && list.some((m) => m.id === id));
-        setModel(pick ?? list[0]?.id ?? "");
+        const pick = [defaultModel, saved].find((id) => id && (id === "auto" || list.some((m) => m.id === id)));
+        setModel(pick ?? "auto");
         await refreshConversations();
       } catch (e) {
         setError((e as Error).message);
@@ -140,6 +140,14 @@ export function useChat(defaultModel: string | null = null) {
             timer ??= setTimeout(flush, 50);
           },
           abortRef.current.signal,
+          // Auto rejim: server qaysi modelni tanlaganini aytadi
+          (routed, label, reason) =>
+            current() &&
+            setMessages((m) => {
+              const copy = [...m];
+              copy[copy.length - 1] = { ...copy[copy.length - 1], model: routed, route: `${label} · ${reason}` };
+              return copy;
+            }),
         );
       } catch (e) {
         if ((e as Error).name === "AbortError") {

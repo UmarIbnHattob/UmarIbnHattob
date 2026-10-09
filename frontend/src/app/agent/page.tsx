@@ -10,6 +10,12 @@ import {
   FolderOpen,
   FolderSearch,
   FolderTree,
+  ImagePlus,
+  ListChecks,
+  MessagesSquare,
+  SquareTerminal,
+  CircleDashed,
+  CheckCircle,
   Laptop,
   Loader2,
   Plus,
@@ -22,13 +28,15 @@ import {
 import { apiFetch } from "@/lib/api";
 import { getDesktop } from "@/lib/desktop";
 import { colorOf } from "@/lib/providers";
-import { useAgent, type AgentItem } from "@/hooks/useAgent";
+import { useAgent, type AgentItem, type PlanStep } from "@/hooks/useAgent";
+import type { ModelInfo } from "@/lib/chatApi";
+import ModelSelector from "@/components/ModelSelector";
 import { useI18n, type TKey } from "@/lib/i18n";
 import Markdown from "@/components/Markdown";
 import OrbitLogo from "@/components/OrbitLogo";
 import VoiceButton from "@/components/VoiceButton";
 
-type AgentModel = { id: string; label: string; provider: string };
+type AgentModel = ModelInfo;
 const MODEL_KEY = "omniai-agent-model";
 
 const TOOL_ICONS: Record<string, typeof FileText> = {
@@ -38,16 +46,63 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
   edit_file: FilePen,
   search_files: Search,
   run_command: Terminal,
+  update_plan: ListChecks,
+  generate_image: ImagePlus,
+  ask_expert: MessagesSquare,
 };
 
 function argSummary(name: string, args: Record<string, unknown>) {
   if (name === "run_command") return String(args.command ?? "");
   if (name === "search_files") return `“${args.query}”${args.path && args.path !== "." ? ` · ${args.path}` : ""}`;
+  if (name === "ask_expert") return `${args.expertise}: ${String(args.question ?? "").slice(0, 90)}`;
   return String(args.path ?? ".");
 }
 
 const OPENABLE = /\.(html?|svg|png|jpe?g|gif|webp|pdf|md|txt|csv)$/i;
-const NEEDS_APPROVAL = new Set(["write_file", "edit_file", "run_command"]);
+const NEEDS_APPROVAL = new Set(["write_file", "edit_file", "run_command", "generate_image"]);
+const FILE_TOOLS = new Set(["write_file", "edit_file", "generate_image"]);
+
+/** Agentning jonli rejasi: bajarilgan qadamlar belgilanadi, progress chizig'i silliq to'ladi. */
+function PlanPanel({ steps }: { steps: PlanStep[] }) {
+  const { t } = useI18n();
+  const done = steps.filter((s) => s.status === "done").length;
+  return (
+    <div className="msg-in sticky top-0 z-10 rounded-xl border border-violet-500/30 bg-neutral-900/95 p-3 shadow-lg backdrop-blur">
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <span className="flex items-center gap-1.5 font-medium text-violet-300">
+          <ListChecks size={14} /> {t("agent.plan")}
+        </span>
+        <span className="tabular-nums text-neutral-500">
+          {done}/{steps.length}
+        </span>
+      </div>
+      <div className="mb-2 h-1 overflow-hidden rounded-full bg-neutral-800">
+        <div className="h-full rounded-full bg-violet-500 transition-all duration-700" style={{ width: `${(done / Math.max(1, steps.length)) * 100}%` }} />
+      </div>
+      <ol className="grid gap-1 sm:grid-cols-2">
+        {steps.map((s, i) => (
+          <li key={i} className={`flex items-center gap-2 text-sm transition-colors ${s.status === "done" ? "text-neutral-500 line-through" : s.status === "in_progress" ? "text-neutral-50" : "text-neutral-400"}`}>
+            {s.status === "done" ? (
+              <CheckCircle size={14} className="shrink-0 text-emerald-400" />
+            ) : s.status === "in_progress" ? (
+              <Loader2 size={14} className="shrink-0 animate-spin text-violet-400" />
+            ) : (
+              <CircleDashed size={14} className="shrink-0 text-neutral-600" />
+            )}
+            <span className="truncate">{s.title}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+const QUICK: { label: TKey; prompt: TKey }[] = [
+  { label: "agent.quick.website", prompt: "agent.prompt.website" },
+  { label: "agent.quick.landing", prompt: "agent.prompt.landing" },
+  { label: "agent.quick.bug", prompt: "agent.prompt.bug" },
+  { label: "agent.quick.readme", prompt: "agent.prompt.readme" },
+];
 
 /** Bitta asbob chaqiruvi: ishlayotganda skaner nuri, tugagach natijani ochib ko'rish mumkin. */
 function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
@@ -59,9 +114,9 @@ function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
   const filePath = String(item.args.path ?? "");
   const desktop = getDesktop();
   const canOpen =
-    item.status === "ok" && (item.name === "write_file" || item.name === "edit_file") && OPENABLE.test(filePath) && !!desktop?.open;
+    item.status === "ok" && FILE_TOOLS.has(item.name) && OPENABLE.test(filePath) && !!desktop?.open;
 
-  const canReveal = item.status === "ok" && (item.name === "write_file" || item.name === "edit_file") && !!desktop?.reveal;
+  const canReveal = item.status === "ok" && FILE_TOOLS.has(item.name) && !!desktop?.reveal;
 
   async function openFile(e: React.MouseEvent) {
     e.stopPropagation();
@@ -156,7 +211,7 @@ export default function AgentPage() {
         } catch {
           /* e'tiborsiz */
         }
-        setModel(list.some((m) => m.id === saved) ? saved! : (list[0]?.id ?? ""));
+        setModel(list.some((m) => m.id === saved) ? saved! : "auto");
       })
       .catch((e) => setNotice((e as Error).message));
   }, []);
@@ -168,7 +223,7 @@ export default function AgentPage() {
   if (hasDesktop === null) return null;
   if (!hasDesktop) return <NeedsDesktop />;
 
-  const provider = models.find((m) => m.id === model)?.provider;
+  const provider = agent.session?.provider ?? models.find((m) => m.id === model)?.provider;
 
   async function pick() {
     const f = await getDesktop()!.pickFolder();
@@ -197,26 +252,39 @@ export default function AgentPage() {
           {folder ? folder.name : t("agent.pickFolder")}
         </button>
         {folder && <span className="hidden truncate text-xs text-neutral-500 md:inline">{folder.path}</span>}
-        <select
-          value={model}
-          disabled={agent.started}
-          title={agent.started ? t("agent.modelLocked") : undefined}
-          onChange={(e) => {
-            setModel(e.target.value);
-            try {
-              localStorage.setItem(MODEL_KEY, e.target.value);
-            } catch {
-              /* e'tiborsiz */
-            }
-          }}
-          className="ml-auto min-w-0 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm disabled:opacity-60"
-        >
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        {folder && getDesktop()?.openTerminal && (
+          <button
+            onClick={async () => {
+              const r = await getDesktop()!.openTerminal!();
+              setNotice(r.ok ? null : (r.error ?? null));
+            }}
+            title={t("agent.terminalHint")}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50"
+          >
+            <SquareTerminal size={14} /> {t("agent.terminal")}
+          </button>
+        )}
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          {agent.session && model === "auto" && (
+            <span className="fade-swap hidden text-xs text-neutral-400 sm:inline">
+              <span className="text-violet-400">Auto →</span> {agent.session.label}
+            </span>
+          )}
+          <ModelSelector
+            models={models}
+            value={model}
+            disabled={agent.started}
+            title={agent.started ? t("agent.modelLocked") : undefined}
+            onChange={(id) => {
+              setModel(id);
+              try {
+                localStorage.setItem(MODEL_KEY, id);
+              } catch {
+                /* e'tiborsiz */
+              }
+            }}
+          />
+        </div>
         <button
           onClick={agent.reset}
           disabled={agent.running || !agent.started}
@@ -236,10 +304,32 @@ export default function AgentPage() {
             </button>
           </div>
         )}
+        {agent.plan.length > 0 && <PlanPanel steps={agent.plan} />}
         {folder && !agent.started && (
-          <p className="msg-in mt-16 text-center text-neutral-500">
-            {t("agent.ready", { folder: folder.name })}
-          </p>
+          <div className="msg-in mx-auto mt-16 flex max-w-xl flex-col items-center gap-4 text-center">
+            <OrbitLogo size={56} focus={provider} />
+            <p className="text-neutral-500">{t("agent.ready", { folder: folder.name })}</p>
+            <div className="stagger flex flex-wrap justify-center gap-2">
+              {QUICK.map((q, i) => (
+                <button
+                  key={q.label}
+                  style={{ animationDelay: `${i * 60}ms` }}
+                  onClick={() => {
+                    setInput(t(q.prompt));
+                    requestAnimationFrame(() => {
+                      const el = document.querySelector<HTMLTextAreaElement>("#agent-input");
+                      el?.focus();
+                      el?.setSelectionRange(el.value.length, el.value.length);
+                    });
+                  }}
+                  className="rounded-full border border-neutral-700 px-3 py-1.5 text-sm transition hover:-translate-y-0.5 hover:border-violet-500 hover:bg-violet-500/10"
+                >
+                  {t(q.label)}
+                </button>
+              ))}
+            </div>
+            {getDesktop()?.openTerminal && <p className="max-w-md text-xs text-neutral-500">💡 {t("agent.terminalHint")}</p>}
+          </div>
         )}
         {agent.items.map((it) => {
           if (it.kind === "user")
@@ -279,6 +369,7 @@ export default function AgentPage() {
 
       <div className="flex gap-2 border-t border-neutral-800 p-3">
         <textarea
+          id="agent-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {

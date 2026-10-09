@@ -9,6 +9,9 @@ export type OmniDesktop = {
   open?: (relPath: string) => Promise<{ ok: boolean; error?: string }>;
   /** v3+: faylni fayl menejerida ko'rsatish */
   reveal?: (relPath: string) => Promise<{ ok: boolean; error?: string }>;
+  /** v4+: AI yaratgan rasmni saqlash va papkada terminal ochish */
+  saveImage?: (relPath: string, base64: string) => Promise<ToolResult>;
+  openTerminal?: () => Promise<{ ok: boolean; error?: string }>;
 };
 
 declare global {
