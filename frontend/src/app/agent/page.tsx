@@ -8,6 +8,7 @@ import {
   FilePen,
   FileText,
   FolderOpen,
+  FolderSearch,
   FolderTree,
   Laptop,
   Loader2,
@@ -58,10 +59,18 @@ function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
   const canOpen =
     item.status === "ok" && (item.name === "write_file" || item.name === "edit_file") && OPENABLE.test(filePath) && !!desktop?.open;
 
+  const canReveal = item.status === "ok" && (item.name === "write_file" || item.name === "edit_file") && !!desktop?.reveal;
+
   async function openFile(e: React.MouseEvent) {
     e.stopPropagation();
     const r = await desktop!.open!(filePath);
     setOpenError(r.ok ? null : (r.error ?? "Ochib bo‘lmadi"));
+  }
+
+  async function revealFile(e: React.MouseEvent) {
+    e.stopPropagation();
+    const r = await desktop!.reveal!(filePath);
+    setOpenError(r.ok ? null : (r.error ?? "Ko‘rsatib bo‘lmadi"));
   }
 
   return (
@@ -83,6 +92,16 @@ function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
             className="flex items-center gap-1 rounded-md bg-violet-600 px-2 py-0.5 text-xs text-white hover:bg-violet-500"
           >
             <ExternalLink size={12} /> Ochish
+          </span>
+        )}
+        {canReveal && (
+          <span
+            role="button"
+            onClick={revealFile}
+            title="Fayl menejerida ko‘rsatish"
+            className="flex items-center gap-1 rounded-md border border-neutral-700 px-2 py-0.5 text-xs text-neutral-300 hover:border-violet-500 hover:text-white"
+          >
+            <FolderSearch size={12} /> Papkada ko‘rsatish
           </span>
         )}
         {item.status === "running" && <Loader2 size={15} className="animate-spin text-blue-300" />}

@@ -3,7 +3,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("omniDesktop", {
-  version: 2,
+  version: 3,
   platform: process.platform,
   /** Papka tanlash dialogi. Natija: { name, path } yoki null. */
   pickFolder: () => ipcRenderer.invoke("omni:pickFolder"),
@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld("omniDesktop", {
   tool: (name, args) => ipcRenderer.invoke("omni:tool", name, args),
   /** Papkadagi faylni odatiy dasturda ochish (HTML, rasm, PDF, matn). */
   open: (relPath) => ipcRenderer.invoke("omni:open", relPath),
+  /** Faylni fayl menejerida ko'rsatish. */
+  reveal: (relPath) => ipcRenderer.invoke("omni:reveal", relPath),
 });

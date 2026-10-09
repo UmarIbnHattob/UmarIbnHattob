@@ -162,6 +162,19 @@ ipcMain.handle("omni:open", async (event, rel) => {
   }
 });
 
+// Faylni fayl menejerida belgilangan holda ko'rsatish (har qanday tur uchun xavfsiz: hech narsa ishga tushmaydi)
+ipcMain.handle("omni:reveal", async (event, rel) => {
+  if (!trusted(event)) throw new Error("Ruxsat yo'q");
+  const s = state.get(event.sender.id);
+  if (!s?.root) return { ok: false, error: "Papka tanlanmagan" };
+  try {
+    shell.showItemInFolder(resolveInside(s.root, String(rel), { mustExist: true }));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // Mikrofon: faqat ilova serveriga ruxsat (ovozli buyruqlar uchun)
 function setupPermissions() {
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
