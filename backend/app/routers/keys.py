@@ -1,6 +1,7 @@
 """API kalitlarni boshqarish. Kalitning o'zi hech qachon javobda qaytarilmaydi."""
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -8,7 +9,7 @@ from app.crypto import encrypt
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import ApiKey, Provider, User
-from app.quota import current_month, platform_key, used_this_month
+from app.quota import current_month, exhausted, platform_key, used_this_month
 from app.schemas import ApiKeyIn, ApiKeyOut, UsageOut
 
 router = APIRouter(prefix="/keys", tags=["keys"])
@@ -18,13 +19,16 @@ router = APIRouter(prefix="/keys", tags=["keys"])
 def list_keys(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Har bir provayder uchun kalit sozlangan-sozlanmaganini qaytaradi."""
     saved = {k.provider: k for k in db.scalars(select(ApiKey).where(ApiKey.user_id == user.id))}
+    out_of_quota = exhausted(db, user)
     return [
         ApiKeyOut(
             provider=p,
             configured=p in saved,
             last4=saved[p].last4 if p in saved else None,
             updated_at=saved[p].updated_at if p in saved else None,
-            platform_available=bool(platform_key(p)),
+            # Bepul limit tugagan bo'lsa platforma kaliti amalda ishlamaydi
+            platform_available=bool(platform_key(p)) and not out_of_quota,
+            platform_exhausted=bool(platform_key(p)) and out_of_quota,
         )
         for p in Provider
     ]
@@ -44,15 +48,15 @@ def save_key(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    row = db.scalar(select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.provider == provider))
-    if row is None:
-        row = ApiKey(user_id=user.id, provider=provider, encrypted_key=encrypted, last4=key[-4:])
-        db.add(row)
-    else:
-        row.encrypted_key, row.last4 = encrypted, key[-4:]
+    # Bitta so'rov bilan "bor bo'lsa almashtir, yo'q bo'lsa qo'sh": ikki marta bosilganda ham UniqueViolation (500) bo'lmaydi
+    stmt = insert(ApiKey).values(user_id=user.id, provider=provider, encrypted_key=encrypted, last4=key[-4:])
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[ApiKey.user_id, ApiKey.provider],
+        set_={"encrypted_key": stmt.excluded.encrypted_key, "last4": stmt.excluded.last4, "updated_at": func.now()},
+    ).returning(ApiKey.last4, ApiKey.updated_at)
+    last4, updated_at = db.execute(stmt).one()
     db.commit()
-    db.refresh(row)
-    return ApiKeyOut(provider=provider, configured=True, last4=row.last4, updated_at=row.updated_at)
+    return ApiKeyOut(provider=provider, configured=True, last4=last4, updated_at=updated_at)
 
 
 @router.delete("/{provider}", status_code=204)

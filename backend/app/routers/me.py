@@ -7,11 +7,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.catalog import catalog
 from app.config import settings
 from app.database import get_db
 from app.deps import COOKIE_NAME, get_current_user
-from app.models import ApiKey, Conversation, MediaItem, Provider, UsageEvent, User
+from app.models import ApiKey, Conversation, CustomProvider, MediaItem, Provider, UsageEvent, User
 from app.personalize import Preferences, prefs_of
+from app.providers.presets import PRESETS
 from app.quota import current_month, platform_key, used_this_month
 from app.routers.auth import _set_cookie
 from app.security import hash_password, verify_password
@@ -60,11 +62,17 @@ def patch_me(body: MePatch, db: Session = Depends(get_db), user: User = Depends(
     if "nickname" in fields:
         user.nickname = (body.nickname or "").strip() or None
     if body.preferences is not None:
-        merged = {**prefs_of(user).model_dump(), **body.preferences}
+        current = prefs_of(user)
+        merged = {**current.model_dump(), **body.preferences}
         try:
-            user.preferences = Preferences(**merged).model_dump()
+            prefs = Preferences(**merged)
         except Exception as exc:
             raise HTTPException(422, f"Noto'g'ri sozlama: {exc}")
+        # Yangi standart model haqiqatan mavjud bo'lsin (o'chirilgan provayder yoki xato id saqlanmasin)
+        dm = prefs.default_model
+        if dm not in (None, "auto", current.default_model) and dm not in {m["id"] for m in catalog(db, user)}:
+            raise HTTPException(422, f"Noma'lum model: {dm}")
+        user.preferences = prefs.model_dump()
     db.commit()
     db.refresh(user)
     return _me(db, user)
@@ -79,6 +87,8 @@ class PasswordIn(BaseModel):
 def change_password(body: PasswordIn, response: Response, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(400, "Joriy parol noto'g'ri.")
+    if body.new_password == body.current_password:
+        raise HTTPException(400, "Yangi parol joriy paroldan farq qilishi kerak.")
     user.password_hash = hash_password(body.new_password)
     user.token_version += 1  # boshqa qurilmalardagi sessiyalar bekor bo'ladi
     db.commit()
@@ -139,6 +149,9 @@ def delete_all_conversations(db: Session = Depends(get_db), user: User = Depends
     db.commit()
 
 
+STAT_LABELS = {"anthropic": "Claude", "deepseek": "Deepseek", "gemini": "Gemini", "whisper": "Whisper"}
+
+
 @router.get("/usage/stats")
 def usage_stats(days: int = 14, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Kunlar va provayderlar bo'yicha so'rovlar soni + model/tur bo'yicha jami."""
@@ -154,12 +167,25 @@ def usage_stats(days: int = 14, db: Session = Depends(get_db), user: User = Depe
         base.add_columns(UsageEvent.model, func.count()).group_by(UsageEvent.model).order_by(func.count().desc())
     ).all()
     by_kind = db.execute(base.add_columns(UsageEvent.kind, func.count()).group_by(UsageEvent.kind)).all()
-    series = {}
+    series, totals = {}, {}
     for d, provider, n in per_day:
         series.setdefault(d.date().isoformat(), {})[provider] = n
+        totals[provider] = totals.get(provider, 0) + n
+    # Seriya kalitlari: o'rnatilganlar, "whisper" (ovoz) va custom provayder turlari (openrouter, groq, ollama...).
+    # UI har qanday kalitni ko'rsata olishi uchun nomlari ham beriladi.
+    names: dict[str, list[str]] = {}
+    for cp in db.scalars(select(CustomProvider).where(CustomProvider.user_id == user.id).order_by(CustomProvider.created_at)):
+        names.setdefault(cp.kind, []).append(cp.name)
+    labels = {
+        p: STAT_LABELS.get(p) or ", ".join(dict.fromkeys(names.get(p, []))) or PRESETS.get(p, {}).get("name") or p
+        for p in totals
+    }
     return {
         "days": [(since + timedelta(days=i)).date().isoformat() for i in range(days)],
         "series": series,
+        "providers": sorted(totals, key=lambda p: (-totals[p], p)),  # ko'pdan kamga
+        "labels": labels,
+        "total": sum(totals.values()),
         "by_model": [{"model": m, "count": n} for m, n in by_model],
         "by_kind": {k: n for k, n in by_kind},
         "quota": {"month": current_month(), "used": used_this_month(db, user), "limit": settings.free_monthly_requests},

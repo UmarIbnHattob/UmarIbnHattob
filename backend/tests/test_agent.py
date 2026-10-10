@@ -98,3 +98,108 @@ def test_agent_endpoint(client, monkeypatch):
     assert client.post("/api/agent/step", json=body).status_code == 400
     # Tool-calling'siz model rad etiladi
     assert client.post("/api/agent/step", json={"model": "deepseek-reasoner", "messages": [{"role": "user", "content": "x"}]}).status_code == 400
+
+
+def _platform_gemini(monkeypatch, limit=5):
+    from app.config import settings
+    monkeypatch.setattr(settings, "platform_gemini_key", "platform-gemini")
+    monkeypatch.setattr(settings, "free_monthly_requests", limit)
+
+
+def test_agent_validation_before_quota_and_malformed_history(client, monkeypatch):
+    _platform_gemini(monkeypatch)
+    client.put("/api/keys/anthropic", json={"key": "key-anthropic-1234"})
+    claude_turn = {"role": "assistant", "provider": "anthropic", "raw": [{"type": "text", "text": "ok"}]}
+    bad_bodies = [
+        # Claude sessiyasini Gemini bilan davom ettirish (oila almashuvi)
+        {"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "x"}, claude_turn, {"role": "user", "content": "y"}]},
+        # raw yo'q / noto'g'ri shakl
+        {"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "x"}, {"role": "assistant", "provider": "gemini"}]},
+        {"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "x"}, {"role": "assistant", "provider": "gemini", "raw": "RAW"}]},
+        # tool_results: bo'sh, id/output yo'q, Gemini uchun name yo'q
+        {"model": "gemini-2.5-flash", "messages": [{"role": "tool_results", "results": []}]},
+        {"model": "gemini-2.5-flash", "messages": [{"role": "tool_results", "results": [{"name": "read_file"}]}]},
+        {"model": "gemini-2.5-flash", "messages": [{"role": "tool_results", "results": [{"id": "g0", "output": "ok"}]}]},
+        {"model": "claude-sonnet-5-5", "messages": [{"role": "tool_results", "results": [{"id": "t1", "output": {"x": 1}}]}]},
+        # user matn emas
+        {"model": "gemini-2.5-flash", "messages": [{"role": "user"}]},
+        # tool calling'siz o'rnatilgan model
+        {"model": "deepseek-reasoner", "messages": [{"role": "user", "content": "x"}]},
+    ]
+    for body in bad_bodies:
+        r = client.post("/api/agent/step", json=body)
+        assert r.status_code == 400, (body, r.text)
+    assert client.get("/api/usage").json()["used"] == 0  # rad etilgan so'rovlar limitni yemadi
+
+
+def test_openai_family_malformed_raw_is_400(client, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "platform_deepseek_key", "platform-deepseek")
+    base = {"model": "deepseek-chat"}
+    raws = [
+        None,
+        {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "function": {"name": "x"}}]},  # id yo'q
+        {"role": "assistant", "content": "", "items": [{"type": "function_call", "name": "write_file"}]},  # call_id yo'q
+        ["not", "a", "dict"],
+    ]
+    for raw in raws:
+        msgs = [{"role": "user", "content": "x"}, {"role": "assistant", "provider": "deepseek", "raw": raw}]
+        assert client.post("/api/agent/step", json={**base, "messages": msgs}).status_code == 400, raw
+
+
+def test_agent_failure_refunds_and_success_records(client, monkeypatch):
+    from app.providers.base import ProviderError
+    _platform_gemini(monkeypatch)
+
+    async def fail(api_key, model, system, messages):
+        raise ProviderError("Gemini serverida xato (500).")
+    monkeypatch.setitem(adapters.STEPPERS, "gemini", fail)
+    body = {"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "salom"}]}
+    r = client.post("/api/agent/step", json=body)
+    assert r.status_code == 502 and client.get("/api/usage").json()["used"] == 0
+    assert client.get("/api/usage/stats").json()["by_kind"] == {}
+
+    async def ok(api_key, model, system, messages):
+        return StepResult(raw={"role": "model", "parts": [{"text": "ok"}]}, text="ok", tool_calls=[])
+    monkeypatch.setitem(adapters.STEPPERS, "gemini", ok)
+    assert client.post("/api/agent/step", json=body).status_code == 200
+    assert client.get("/api/usage").json()["used"] == 1
+    assert client.get("/api/usage/stats").json()["by_kind"] == {"agent": 1}
+
+
+def test_agent_image_failure_refunds(client, monkeypatch):
+    from app.providers import gemini_image
+    from app.providers.base import ProviderError
+    _platform_gemini(monkeypatch)
+
+    async def fail(api_key, model, prompt):
+        raise ProviderError("Model rasm qaytarmadi.")
+    monkeypatch.setattr(gemini_image, "generate_image", fail)
+    assert client.post("/api/agent/image", json={"prompt": "logo"}).status_code == 502
+    assert client.get("/api/usage").json()["used"] == 0
+
+
+def test_custom_model_without_tools_rejected_and_auto_falls_back_to_tools_model(client, monkeypatch):
+    from app.config import settings
+    from app.providers import openai_compat
+    monkeypatch.setattr(settings, "allow_local_providers", True)
+    data = {"data": [
+        {"id": "google/gemma-3-27b-it:free", "architecture": {"output_modalities": ["text"]}, "supported_parameters": []},
+        {"id": "qwen/qwen-2.5-coder-32b", "architecture": {"output_modalities": ["text"]}, "supported_parameters": ["tools"]},
+    ]}
+
+    async def fake_get(self, url, **kw):
+        return httpx.Response(200, json=data, request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    pid = client.post("/api/providers", json={"kind": "openrouter", "api_key": "sk-or-1234"}).json()["id"]
+    seen = {}
+
+    async def fake_step(base_url, api_key, model, system, messages, tools, label="Model"):
+        seen["model"] = model
+        return {"role": "assistant", "content": "ok"}, "ok", [], None
+    monkeypatch.setattr(openai_compat, "step", fake_step)
+    r = client.post("/api/agent/step", json={"model": f"cp:{pid}:google/gemma-3-27b-it:free", "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 400 and "asbob" in r.json()["detail"] and "model" not in seen
+    # Auto: o'rnatilgan model uchun kalit yo'q -> asbob chaqira oladigan custom model
+    r = client.post("/api/agent/step", json={"model": "auto", "messages": [{"role": "user", "content": "sayt yarat"}]})
+    assert r.status_code == 200 and seen["model"] == "qwen/qwen-2.5-coder-32b"

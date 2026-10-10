@@ -12,6 +12,8 @@ os.environ["DATABASE_URL"] = os.environ.get(
 )
 os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-0123456789"
+# Qulf kutish cheksiz bo'lmasin: qulf xatosi (deadlock) test osilib qolishi o'rniga xato bilan tugaydi
+os.environ.setdefault("PGOPTIONS", "-c lock_timeout=5000")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -25,6 +27,8 @@ from app.security import login_limiter  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 def schema():
+    # Test bazasi har safar modellardan qayta quriladi: ustun o'zgarsa (masalan migratsiyada) eski sxema qolmasin
+    Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     yield
 

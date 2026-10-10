@@ -21,6 +21,7 @@ from app.providers.base import ProviderError, friendly_http_error
 
 AGENT_TIMEOUT = httpx.Timeout(connect=10, read=300, write=60, pool=10)
 TRUNCATED = "(Javob uzunlik chegarasida to'xtadi.)"
+FILTERED = "(Javob kontent filtri tomonidan to'xtatildi.)"
 
 
 @dataclass
@@ -81,8 +82,10 @@ _openai_messages = openai_compat.agent_messages
 
 
 async def step_openai(base_url: str, api_key: str | None, model: str, system: str, messages: list[dict], label: str = "Model") -> StepResult:
-    raw, text, calls, truncated = await openai_compat.step(base_url, api_key, model, system, messages, TOOLS, label)
-    return StepResult(raw=raw, text=text, tool_calls=[] if truncated else calls, note=TRUNCATED if truncated else None)
+    raw, text, calls, stop = await openai_compat.step(base_url, api_key, model, system, messages, TOOLS, label)
+    # Kesilgan yoki filtrlangan javobdagi chaqiruvlar yarim bo'lishi mumkin: bajarmaymiz
+    note = {"length": TRUNCATED, "content_filter": FILTERED}.get(stop or "")
+    return StepResult(raw=raw, text=text, tool_calls=[] if note else calls, note=note)
 
 
 async def step_deepseek(api_key: str, model: str, system: str, messages: list[dict]) -> StepResult:

@@ -7,6 +7,14 @@ import httpx
 # Javob uzunligi chegarasi (Claude/Deepseek uchun)
 MAX_OUTPUT_TOKENS = 8192
 TRUNCATED_NOTE = "\n\n_(Javob uzunlik chegarasida to'xtadi. \"Davom et\" deb yozing.)_"
+FILTERED_NOTE = "\n\n_(Javob kontent filtri tomonidan to'xtatildi.)_"
+INTERRUPTED_NOTE = "\n\n_(Javob to'liq kelmadi: ulanish uzilib qoldi. Qayta urinib ko'ring.)_"
+
+
+def refusal_note(label: str, reason: str = "") -> str:
+    """Model so'rovni rad etganda (Claude'dagi kabi) foydalanuvchiga ko'rsatiladigan izoh."""
+    reason = " ".join(reason.split())[:500]
+    return f"\n\n_({label} bu so'rovga javob bermadi{': ' + reason if reason else '.'})_"
 
 # Provayderga 60 soniya javob kutamiz, ulanish uchun 10 soniya
 TIMEOUT = httpx.Timeout(connect=10, read=60, write=30, pool=10)

@@ -12,7 +12,10 @@ class Preferences(BaseModel):
     theme: Literal["system", "light", "dark"] = "system"
     language: Literal["uz", "en", "ru"] = "uz"  # interfeys tili
     response_language: Literal["auto", "uz", "en", "ru"] = "auto"  # AI javob tili
-    default_model: str | None = None
+    # "auto", o'rnatilgan model id si yoki "cp:<provayder uuid>:<model id>"
+    default_model: str | None = Field(
+        default=None, max_length=300, pattern=r"^(auto|[A-Za-z0-9][\w.\-]*|cp:[0-9a-fA-F\-]{36}:\S+)$"
+    )
     custom_instructions: str = Field(default="", max_length=3000)
     font_size: Literal["sm", "md", "lg"] = "md"
     send_with_enter: bool = True

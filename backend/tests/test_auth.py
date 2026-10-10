@@ -61,3 +61,20 @@ def test_first_user_adopts_legacy_data():
     assert [c["title"] for c in first.get("/api/conversations").json()] == ["ESKI"]
     second = make_client("ikkinchi@example.com")
     assert second.get("/api/conversations").json() == []
+
+
+def test_concurrent_registration_same_email_gives_409():
+    from concurrent.futures import ThreadPoolExecutor
+
+    def reg(_):
+        return TestClient(app).post("/api/auth/register", json={"email": "bir@example.com", "password": "parol12345"}).status_code
+
+    with ThreadPoolExecutor(4) as ex:
+        codes = sorted(ex.map(reg, range(4)))
+    assert codes == [201, 409, 409, 409]
+
+
+def test_api_responses_are_not_cached(client):
+    for path in ["/api/me", "/api/auth/me", "/api/conversations", "/api/keys", "/api/usage/stats"]:
+        assert client.get(path).headers["cache-control"] == "no-store", path
+    assert TestClient(app).get("/api/me").headers["cache-control"] == "no-store"  # 401 ham

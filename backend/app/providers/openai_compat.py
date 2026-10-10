@@ -9,12 +9,15 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.providers.base import (
+    FILTERED_NOTE,
+    INTERRUPTED_NOTE,
     MAX_OUTPUT_TOKENS,
     TIMEOUT,
     TRUNCATED_NOTE,
     ProviderError,
     friendly_http_error,
     iter_sse_data,
+    refusal_note,
 )
 
 AGENT_TIMEOUT = httpx.Timeout(connect=10, read=300, write=60, pool=10)
@@ -35,6 +38,19 @@ _RESPONSES_ONLY = re.compile(r"codex|-pro($|-)|deep-research|computer-use")
 # Chatga yaramaydigan OpenAI modellari (embedding, ovoz, rasm, moderatsiya va h.k.)
 _OPENAI_SKIP = re.compile(r"embedding|tts|whisper|transcribe|dall-e|gpt-image|image|davinci|babbage|moderation|realtime|audio|search|sora|instruct")
 _OPENAI_VISION = re.compile(r"gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|o1($|-)|o3|o4|codex")
+# Har qanday provayderda chatga yaramaydigan modellar: ovoz (Whisper, TTS), embedding, moderatsiya/guard, OCR,
+# rerank, faqat rasm chiqaradiganlar (Groq, Mistral, Together, Ollama ro'yxatlarida ham bor)
+_NONCHAT = re.compile(
+    r"whisper|(?<![a-z])tts(?![a-z])|text-to-speech|speech|playai|orpheus|transcri|audio|embed|guard|moderation|"
+    r"(?<![a-z])ocr(?![a-z])|rerank|dall-e|gpt-image|image-only|stable-diffusion|sdxl|flux|imagen"
+)
+# Together AI `type` maydoni: shu turlar chat emas
+_NONCHAT_TYPES = {"image", "embedding", "moderation", "rerank", "audio", "transcribe", "tts", "stt", "video"}
+
+
+def is_chat_model(model_id: str) -> bool:
+    """Nomi bo'yicha chatga yaraydimi (Whisper, TTS, embedding, guard va h.k. emas)."""
+    return not _NONCHAT.search(model_id.lower())
 
 
 def is_openai(base_url: str) -> bool:
@@ -73,6 +89,7 @@ async def stream_chat(
         "messages": ([{"role": "system", "content": system}] if system else [])
         + [{"role": m["role"], "content": _user_content(m) if m["role"] == "user" else m["content"]} for m in messages],
     }
+    refusal: list[str] = []
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             async with client.stream("POST", f"{base_url.rstrip('/')}/chat/completions", headers=_headers(api_key), json=body) as r:
@@ -86,11 +103,18 @@ async def stream_chat(
                     choices = ev.get("choices") or []
                     if not choices:
                         continue
-                    text = choices[0].get("delta", {}).get("content")
-                    if text:
-                        yield text
-                    if choices[0].get("finish_reason") == "length":
+                    delta = choices[0].get("delta") or {}
+                    if delta.get("content"):
+                        yield delta["content"]
+                    if delta.get("refusal"):
+                        refusal.append(delta["refusal"])
+                    finish = choices[0].get("finish_reason")
+                    if finish == "length":
                         yield TRUNCATED_NOTE
+                    elif finish == "content_filter":
+                        yield FILTERED_NOTE
+                if refusal:
+                    yield refusal_note(label, "".join(refusal))
     except httpx.TimeoutException:
         raise ProviderError(f"{label} javob bermadi (vaqt tugadi). Qayta urinib ko'ring.")
     except httpx.ConnectError:
@@ -112,7 +136,10 @@ def agent_messages(system: str, messages: list[dict]) -> list[dict]:
 
 
 async def step(base_url: str, api_key: str | None, model: str, system: str, messages: list[dict], tools: list[dict], label: str = "Model"):
-    """Agent qadami (asbob chaqiruvi bilan). (raw, text, calls, truncated) qaytaradi."""
+    """Agent qadami (asbob chaqiruvi bilan). (raw, text, calls, stop) qaytaradi.
+
+    stop: None (oddiy tugadi), "length" (uzunlik chegarasi) yoki "content_filter" (filtr to'xtatdi).
+    """
     if uses_responses(base_url, model):
         return await _step_responses(base_url, api_key, model, system, messages, tools, label)
     body = {
@@ -140,17 +167,24 @@ async def step(base_url: str, api_key: str | None, model: str, system: str, mess
         raise ProviderError(f"{label}: {str(data['error'].get('message', data['error']))[:300]}")
     choice = (data.get("choices") or [{}])[0]
     msg = choice.get("message") or {}
-    raw = {"role": "assistant", "content": msg.get("content") or ""}
-    if msg.get("tool_calls"):
-        raw["tool_calls"] = msg["tool_calls"]
+    text = msg.get("content") or ""
+    if msg.get("refusal"):
+        text = (text + refusal_note(label, msg["refusal"])).lstrip()
+    raw = {"role": "assistant", "content": text}
+    # Noto'g'ri tuzilgan chaqiruvlar (id/nom yo'q) tashlab yuboriladi: keyingi qadamda xato bermasin
+    tool_calls = [tc for tc in msg.get("tool_calls") or []
+                  if isinstance(tc, dict) and tc.get("id") and isinstance(tc.get("function"), dict) and tc["function"].get("name")]
+    if tool_calls:
+        raw["tool_calls"] = tool_calls
     calls = []
-    for tc in msg.get("tool_calls") or []:
+    for tc in tool_calls:
         try:
             args = json.loads(tc["function"].get("arguments") or "{}")
         except json.JSONDecodeError:
             args = {"__invalid_json__": tc["function"].get("arguments")}
         calls.append({"id": tc["id"], "name": tc["function"]["name"], "args": args})
-    return raw, msg.get("content") or "", calls, choice.get("finish_reason") == "length"
+    finish = choice.get("finish_reason")
+    return raw, text, calls, finish if finish in ("length", "content_filter") else None
 
 
 async def complete(base_url: str, api_key: str | None, model: str, system: str | None, prompt: str, label: str = "Model") -> str:
@@ -171,23 +205,34 @@ async def list_models(base_url: str, api_key: str | None) -> list[dict]:
     out = []
     for m in (r.json().get("data") or [])[:800]:
         mid = m.get("id")
-        if not mid:
+        if not mid or not isinstance(mid, str):
             continue
+        low = mid.lower()
         if is_openai(base_url):
-            if _OPENAI_SKIP.search(mid.lower()):
+            if _OPENAI_SKIP.search(low):
                 continue
-            out.append({"id": mid, "label": mid, "vision": bool(_OPENAI_VISION.search(mid.lower())), "tools": True, "free": False})
+            out.append({"id": mid, "label": mid, "vision": bool(_OPENAI_VISION.search(low)), "tools": True, "free": False})
+            continue
+        if not is_chat_model(mid) or str(m.get("type") or "").lower() in _NONCHAT_TYPES:
+            continue  # Whisper, TTS, embedding, guard va h.k. chat/agent ro'yxatiga kirmaydi
+        caps = m.get("capabilities") if isinstance(m.get("capabilities"), dict) else {}  # Mistral
+        if caps.get("completion_chat") is False:
             continue
         arch = m.get("architecture") or {}
         out_mod = arch.get("output_modalities") or ["text"]
         if "text" not in out_mod:
-            continue  # faqat rasm/audio chiqaradigan modellarni chatga qo'shmaymiz
+            continue  # faqat rasm/audio chiqaradigan modellarni chatga qo'shmaymiz (OpenRouter)
         params = m.get("supported_parameters")
+        if isinstance(params, list):
+            tools = "tools" in params
+        else:
+            tools = caps.get("function_calling", True) is not False
         out.append({
             "id": mid,
             "label": m.get("name") or mid,
-            "vision": "image" in (arch.get("input_modalities") or []) or any(k in mid.lower() for k in ("vision", "-vl", "llava")),
-            "tools": ("tools" in params) if isinstance(params, list) else True,
+            "vision": "image" in (arch.get("input_modalities") or []) or bool(caps.get("vision"))
+            or any(k in low for k in ("vision", "-vl", "llava")),
+            "tools": tools,
             "free": mid.endswith(":free"),
         })
     if is_openai(base_url):
@@ -195,7 +240,8 @@ async def list_models(base_url: str, api_key: str | None) -> list[dict]:
     return out
 
 
-async def transcribe(base_url: str, api_key: str | None, model: str, wav: bytes) -> str:
+async def transcribe(base_url: str, api_key: str | None, model: str, audio: bytes,
+                     filename: str = "voice.wav", mime: str = "audio/wav") -> str:
     """Whisper (OpenAI/Groq) — ovozni matnga."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=90, write=60, pool=10)) as client:
@@ -203,7 +249,7 @@ async def transcribe(base_url: str, api_key: str | None, model: str, wav: bytes)
                 f"{base_url.rstrip('/')}/audio/transcriptions",
                 headers=_headers(api_key),
                 data={"model": model},
-                files={"file": ("voice.wav", wav, "audio/wav")},
+                files={"file": (filename, audio, mime)},
             )
     except httpx.HTTPError:
         raise ProviderError("Ovozni matnga aylantirish xizmatiga ulanib bo'lmadi.")
@@ -255,9 +301,23 @@ def _responses_input(messages: list[dict]) -> list[dict]:
 
 
 def _resp_error(ev: dict, label: str) -> ProviderError:
-    err = ev.get("error") or (ev.get("response") or {}).get("error") or {}
-    msg = err.get("message", err) if isinstance(err, dict) else err
-    return ProviderError(f"{label}: {str(msg or 'nomaʼlum xato')[:300]}")
+    err = ev.get("error") or (ev.get("response") or {}).get("error")
+    if not err and (ev.get("message") or ev.get("code")):
+        # Spec bo'yicha "error" hodisasi: {"type": "error", "code": ..., "message": ..., "param": ...}
+        err = {"message": ev.get("message"), "code": ev.get("code")}
+    if isinstance(err, dict):
+        msg, code = str(err.get("message") or ""), err.get("code")
+        if code and str(code) not in msg:
+            msg = f"{msg} ({code})" if msg else str(code)
+    else:
+        msg = str(err or "")
+    return ProviderError(f"{label}: {(msg or 'nomaʼlum xato')[:300]}")
+
+
+def _incomplete_note(response: dict) -> str:
+    """response.incomplete: uzunlik chegarasi yoki kontent filtri (ikkalasi bir xil ko'rsatilmasin)."""
+    reason = ((response or {}).get("incomplete_details") or {}).get("reason")
+    return FILTERED_NOTE if reason == "content_filter" else TRUNCATED_NOTE
 
 
 async def _stream_responses(base_url, api_key, model, messages, system, label) -> AsyncIterator[str]:
@@ -269,16 +329,35 @@ async def _stream_responses(base_url, api_key, model, messages, system, label) -
             async with client.stream("POST", f"{base_url.rstrip('/')}/responses", headers=_headers(api_key), json=body) as r:
                 if r.status_code != 200:
                     raise friendly_http_error(r.status_code, (await r.aread()).decode(errors="ignore"))
+                finished, sent, refusal = False, False, []
                 async for ev in iter_sse_data(r):
                     if not isinstance(ev, dict):
                         continue
                     kind = ev.get("type")
                     if kind == "response.output_text.delta" and ev.get("delta"):
+                        sent = True
                         yield ev["delta"]
+                    elif kind == "response.refusal.delta" and ev.get("delta"):
+                        refusal.append(ev["delta"])
+                    elif kind == "response.refusal.done":
+                        sent = True
+                        yield refusal_note(label, ev.get("refusal") or "".join(refusal))
+                        refusal = []
                     elif kind in ("error", "response.failed"):
                         raise _resp_error(ev, label)
                     elif kind == "response.incomplete":
-                        yield TRUNCATED_NOTE
+                        finished = sent = True
+                        yield _incomplete_note(ev.get("response") or {})
+                    elif kind == "response.completed":
+                        finished = True
+                if refusal:
+                    sent = True
+                    yield refusal_note(label, "".join(refusal))
+                if not finished:
+                    # Oqim yakuniy hodisasiz uzildi: qisman javob to'liq deb ko'rsatilmasin
+                    if not sent:
+                        raise ProviderError(f"{label}: javob to'liq kelmadi (ulanish uzildi). Qayta urinib ko'ring.")
+                    yield INTERRUPTED_NOTE
     except httpx.TimeoutException:
         raise ProviderError(f"{label} javob bermadi (vaqt tugadi). Qayta urinib ko'ring.")
     except httpx.ConnectError:
@@ -320,13 +399,21 @@ async def _step_responses(base_url, api_key, model, system, messages, tools, lab
     data = r.json()
     if data.get("error"):
         raise _resp_error(data, label)
-    items = [it for it in data.get("output") or [] if it.get("type") in ("message", "function_call", "reasoning")]
+    items = [it for it in data.get("output") or []
+             if isinstance(it, dict) and it.get("type") in ("message", "function_call", "reasoning")]
     # Kirishda faqat kerakli maydonlar qolsin (status va h.k. qaytarilganda xato bermasin)
     clean = []
     for it in items:
         if it["type"] == "message":
-            clean.append({"role": "assistant", "content": "".join(c.get("text", "") for c in it.get("content") or [] if c.get("type") == "output_text")})
+            content = [c for c in it.get("content") or [] if isinstance(c, dict)]
+            text = "".join(c.get("text") or "" for c in content if c.get("type") == "output_text")
+            refused = "".join(c.get("refusal") or "" for c in content if c.get("type") == "refusal")
+            if refused:  # rad etish matni foydalanuvchiga ko'rsatiladi (bo'sh javob o'rniga)
+                text = (text + refusal_note(label, refused)).lstrip()
+            clean.append({"role": "assistant", "content": text})
         elif it["type"] == "function_call":
+            if not (isinstance(it.get("call_id"), str) and isinstance(it.get("name"), str)):
+                continue  # noto'g'ri tuzilgan chaqiruv: keyingi qadamda KeyError bermasin
             clean.append({"type": "function_call", "call_id": it["call_id"], "name": it["name"], "arguments": it.get("arguments") or "{}"})
         else:
             clean.append({k: v for k, v in it.items() if k in ("type", "id", "summary", "encrypted_content")})
@@ -339,5 +426,8 @@ async def _step_responses(base_url, api_key, model, system, messages, tools, lab
             except json.JSONDecodeError:
                 args = {"__invalid_json__": it["arguments"]}
             calls.append({"id": it["call_id"], "name": it["name"], "args": args})
-    truncated = data.get("status") == "incomplete"
-    return {"role": "assistant", "content": text, "items": clean}, text, calls, truncated
+    stop = None
+    if data.get("status") == "incomplete":
+        reason = (data.get("incomplete_details") or {}).get("reason")
+        stop = "content_filter" if reason == "content_filter" else "length"
+    return {"role": "assistant", "content": text, "items": clean}, text, calls, stop

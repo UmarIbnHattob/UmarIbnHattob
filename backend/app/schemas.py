@@ -15,8 +15,10 @@ class ApiKeyOut(BaseModel):
     configured: bool
     last4: str | None = None
     updated_at: datetime | None = None
-    # O'z kaliti bo'lmasa ham platforma kaliti orqali ishlay oladimi
+    # O'z kaliti bo'lmasa ham platforma kaliti orqali ishlay oladimi (bepul limit tugagan bo'lsa false)
     platform_available: bool = False
+    # Platforma kaliti bor, lekin bu oy uchun bepul limit tugagan
+    platform_exhausted: bool = False
 
 
 class ModelOut(BaseModel):

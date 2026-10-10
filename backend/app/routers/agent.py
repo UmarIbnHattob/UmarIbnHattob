@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.agent import adapters
 from app.agent.tools import SYSTEM_PROMPT
-from app.catalog import catalog, resolve
+from app.catalog import BUILTIN_AGENT, CUSTOM_PREFIX, catalog, charge, resolve
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Provider, User
@@ -19,7 +19,7 @@ from app.personalize import system_prompt
 from app.providers import gemini_image
 from app.providers.base import ProviderError
 from app.providers.router_auto import choose
-from app.quota import resolve_key_info
+from app.quota import refund_on_error, resolve_key_info
 from app.usage_log import record
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -50,7 +50,9 @@ class StepIn(BaseModel):
 def agent_models(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Asbob chaqira oladigan modellar; birinchisi "auto"."""
     items = [m for m in catalog(db, user) if m["tools"]]
-    return [{"id": "auto", "label": "Auto", "provider": "auto", "available": True, "group": "auto", "source": "builtin", "vision": True, "tools": True}] + items
+    auto = {"id": "auto", "label": "Auto", "provider": "auto", "available": True, "group": "auto", "source": "builtin",
+            "vision": True, "tools": True, "free": False, "platform": False, "unavailable_reason": None}
+    return [auto] + items
 
 
 def _pick_auto(db: Session, user: User) -> str:
@@ -60,38 +62,84 @@ def _pick_auto(db: Session, user: User) -> str:
     return picked["id"]
 
 
+BAD_HISTORY = "Agent tarixi noto'g'ri formatda (eski sessiya bo'lishi mumkin). Yangi sessiya boshlang."
+
+
+def _raw_ok(raw: object, fam: str) -> bool:
+    """Assistant `raw` javobi shu format oilasiga mosmi (keyingi qadamda provayderga o'zgarishsiz yuboriladi)."""
+    if fam == "anthropic":
+        return isinstance(raw, list) and all(isinstance(b, dict) and isinstance(b.get("type"), str) for b in raw)
+    if fam == "gemini":  # Gemini ba'zan "parts"siz content qaytaradi: o'zgarishsiz qoldiramiz
+        parts = raw.get("parts", []) if isinstance(raw, dict) else None
+        return isinstance(parts, list) and all(isinstance(p, dict) for p in parts)
+    if not isinstance(raw, dict):
+        return False
+    if "items" in raw:  # OpenAI Responses formati
+        items = raw["items"]
+        return isinstance(items, list) and all(
+            isinstance(it, dict) and (it.get("type") != "function_call"
+                                      or (isinstance(it.get("call_id"), str) and isinstance(it.get("name"), str)))
+            for it in items
+        )
+    calls = raw.get("tool_calls") or []
+    return isinstance(calls, list) and all(
+        isinstance(c, dict) and isinstance(c.get("id"), str) and isinstance(c.get("function"), dict)
+        and isinstance(c["function"].get("name"), str)
+        for c in calls
+    )
+
+
+def _validate(msgs: list[dict], fam: str) -> None:
+    """Noto'g'ri yoki eski formatdagi xabarlar 500 emas, tushunarli 400 bersin (provayderga yuborishdan oldin)."""
+    for m in msgs:
+        if m["role"] == "user":
+            if not isinstance(m.get("content"), str):
+                raise HTTPException(400, "Foydalanuvchi xabari matn bo'lishi kerak")
+        elif m["role"] == "assistant":
+            if family(m.get("provider") or "") != fam:
+                # Thinking/signature bloklari boshqa formatga o'tmaydi: sessiya bitta format oilasida qoladi
+                raise HTTPException(400, "Agent sessiyasi o'rtasida bu modelga o'tib bo'lmaydi. Yangi sessiya boshlang.")
+            if not _raw_ok(m.get("raw"), fam):
+                raise HTTPException(400, BAD_HISTORY)
+        else:
+            if not m.get("results"):
+                raise HTTPException(400, "tool_results bo'sh")
+            for r in m["results"]:
+                if not isinstance(r.get("id"), str) or not isinstance(r.get("output"), str) \
+                        or (fam == "gemini" and not isinstance(r.get("name"), str)):
+                    raise HTTPException(400, BAD_HISTORY)
+
+
 @router.post("/step")
 async def agent_step(body: StepIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ref = _pick_auto(db, user) if body.model == "auto" else body.model
-    if not ref.startswith("cp:") and ref not in {m["id"] for m in catalog(db, user) if m["tools"]}:
+    if not ref.startswith(CUSTOM_PREFIX) and ref not in BUILTIN_AGENT:
         raise HTTPException(400, f"Bu model agent rejimini qo'llab-quvvatlamaydi: {ref}")
-    res_model = resolve(db, user, ref)
+    # Avval hamma tekshiruv (limit yechilmaydi), keyin bepul limitdan bitta so'rov band qilinadi
+    res_model = resolve(db, user, ref, reserve=False)
+    if not res_model.tools:
+        raise HTTPException(400, f"{res_model.label} asbob chaqira olmaydi (tool calling yo'q), agent rejimida ishlamaydi. Boshqa model tanlang.")
     fam = family(res_model.provider)
-
     msgs = [m.model_dump(exclude_none=True) for m in body.messages]
-    for m in msgs:
-        if m["role"] == "user" and not isinstance(m.get("content"), str):
-            raise HTTPException(400, "Foydalanuvchi xabari matn bo'lishi kerak")
-        if m["role"] == "assistant" and family(m.get("provider") or "") != fam:
-            # Thinking/signature bloklari boshqa formatga o'tmaydi: sessiya bitta format oilasida qoladi
-            raise HTTPException(400, "Agent sessiyasi o'rtasida bu modelga o'tib bo'lmaydi. Yangi sessiya boshlang.")
-        if m["role"] == "tool_results" and not m.get("results"):
-            raise HTTPException(400, "tool_results bo'sh")
+    _validate(msgs, fam)
+    charge(db, user, res_model)
 
     personal = system_prompt(user)
-    record(user.id, "agent", res_model.provider, res_model.id, res_model.platform)
+    user_id = user.id
     db.close()  # model 1-5 daqiqa o'ylashi mumkin: ulanishni band qilmaymiz
 
     system = SYSTEM_PROMPT.format(folder=body.folder.replace("\n", " "))
     if personal:
         system += "\n\n" + personal
-    try:
-        if fam == "openai" and res_model.base_url:
-            res = await adapters.step_openai(res_model.base_url, res_model.api_key, res_model.id, system, msgs, res_model.label)
-        else:
-            res = await adapters.STEPPERS[res_model.provider](res_model.api_key, res_model.id, system, msgs)
-    except ProviderError as exc:
-        raise HTTPException(502, str(exc))
+    with refund_on_error(user_id, res_model.platform):
+        try:
+            if fam == "openai" and res_model.base_url:
+                res = await adapters.step_openai(res_model.base_url, res_model.api_key, res_model.id, system, msgs, res_model.label)
+            else:
+                res = await adapters.STEPPERS[res_model.provider](res_model.api_key, res_model.id, system, msgs)
+        except ProviderError as exc:
+            raise HTTPException(502, str(exc))
+    record(user_id, "agent", res_model.provider, res_model.id, res_model.platform)
     return {
         "assistant": {"role": "assistant", "provider": res_model.provider, "raw": res.raw},
         "text": res.text,
@@ -110,12 +158,14 @@ async def agent_image(body: ImageIn, db: Session = Depends(get_db), user: User =
     """generate_image asbobi: PNG ni base64 qilib qaytaradi (desktop uni papkaga ruxsat bilan yozadi)."""
     api_key, platform = resolve_key_info(db, user, Provider.gemini)
     model = gemini_image.IMAGE_MODELS[0]["id"]
-    record(user.id, "image", "gemini", model, platform)
+    user_id = user.id
     db.close()
-    try:
-        mime, data = await gemini_image.generate_image(api_key, model, body.prompt)
-    except ProviderError as exc:
-        raise HTTPException(502, str(exc))
+    with refund_on_error(user_id, platform):
+        try:
+            mime, data = await gemini_image.generate_image(api_key, model, body.prompt)
+        except ProviderError as exc:
+            raise HTTPException(502, str(exc))
+    record(user_id, "image", "gemini", model, platform)
     return {"mime": mime, "data": base64.b64encode(data).decode(), "model": model}
 
 
@@ -141,10 +191,14 @@ async def agent_expert(body: ExpertIn, db: Session = Depends(get_db), user: User
     if picked is None:
         raise HTTPException(400, "Ekspert uchun boshqa model topilmadi.")
     res_model = resolve(db, user, picked["id"])
-    record(user.id, "agent", res_model.provider, res_model.id, res_model.platform)
+    user_id = user.id
     db.close()
-    try:
-        answer = "".join([t async for t in res_model.stream([{"role": "user", "content": body.question}], EXPERT_SYSTEM[body.expertise])])
-    except ProviderError as exc:
-        raise HTTPException(502, str(exc))
+    with refund_on_error(user_id, res_model.platform):
+        try:
+            answer = "".join([t async for t in res_model.stream([{"role": "user", "content": body.question}], EXPERT_SYSTEM[body.expertise])])
+        except ProviderError as exc:
+            raise HTTPException(502, str(exc))
+        if not answer.strip():
+            raise HTTPException(502, f"{res_model.label} bo'sh javob qaytardi.")
+    record(user_id, "agent", res_model.provider, res_model.id, res_model.platform)
     return {"answer": answer, "model": res_model.label}
