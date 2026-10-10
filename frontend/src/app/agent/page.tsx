@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
+  Download,
   ExternalLink,
   FilePen,
   FileText,
@@ -28,7 +29,8 @@ import {
 import { apiFetch } from "@/lib/api";
 import { getDesktop } from "@/lib/desktop";
 import { colorOf } from "@/lib/providers";
-import { useAgent, type AgentItem, type PlanStep } from "@/hooks/useAgent";
+import { INVALID_JSON, expertiseOf, useAgent, type AgentItem, type PlanStep } from "@/hooks/useAgent";
+import { useAuth } from "@/components/AuthGate";
 import type { ModelInfo } from "@/lib/chatApi";
 import ModelSelector from "@/components/ModelSelector";
 import { useI18n, type TKey } from "@/lib/i18n";
@@ -38,6 +40,11 @@ import VoiceButton from "@/components/VoiceButton";
 
 type AgentModel = ModelInfo;
 const MODEL_KEY = "omniai-agent-model";
+// Desktop ilovani olish sahifasi (README dagi o'rnatish bo'limi; tayyor relizlar bo'lsa env orqali almashtiriladi)
+const DESKTOP_URL =
+  process.env.NEXT_PUBLIC_DESKTOP_URL ?? "https://github.com/UmarIbnHattob/UmarIbnHattob#desktop-ilova-va-agent-rejimi";
+// Yuborish bosilgandan keyin shu vaqt ichida To'xtatish bosilmaydi (ikki marta bosish ishni darhol to'xtatmasin)
+const STOP_GUARD_MS = 500;
 
 const TOOL_ICONS: Record<string, typeof FileText> = {
   list_dir: FolderTree,
@@ -51,10 +58,11 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
   ask_expert: MessagesSquare,
 };
 
-function argSummary(name: string, args: Record<string, unknown>) {
+function argSummary(name: string, args: Record<string, unknown>, t: ReturnType<typeof useI18n>["t"]) {
+  if (INVALID_JSON in args) return t("agent.badArgsShort");
   if (name === "run_command") return String(args.command ?? "");
   if (name === "search_files") return `“${args.query}”${args.path && args.path !== "." ? ` · ${args.path}` : ""}`;
-  if (name === "ask_expert") return `${args.expertise}: ${String(args.question ?? "").slice(0, 90)}`;
+  if (name === "ask_expert") return `${expertiseOf(args)}: ${String(args.question ?? "").slice(0, 90)}`;
   return String(args.path ?? ".");
 }
 
@@ -121,13 +129,13 @@ function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
   async function openFile(e: React.MouseEvent) {
     e.stopPropagation();
     const r = await desktop!.open!(filePath);
-    setOpenError(r.ok ? null : (r.error ?? "Ochib bo‘lmadi"));
+    setOpenError(r.ok ? null : (r.error ?? t("agent.openFailed")));
   }
 
   async function revealFile(e: React.MouseEvent) {
     e.stopPropagation();
     const r = await desktop!.reveal!(filePath);
-    setOpenError(r.ok ? null : (r.error ?? "Ko‘rsatib bo‘lmadi"));
+    setOpenError(r.ok ? null : (r.error ?? t("agent.revealFailed")));
   }
 
   return (
@@ -138,7 +146,7 @@ function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
       >
         <Icon size={15} className="shrink-0 text-violet-300" />
         <span className="shrink-0 text-neutral-400">{label}</span>
-        <code className="min-w-0 flex-1 truncate text-neutral-200">{argSummary(item.name, item.args)}</code>
+        <code className="min-w-0 flex-1 truncate text-neutral-200">{argSummary(item.name, item.args, t)}</code>
         {item.status === "running" && NEEDS_APPROVAL.has(item.name) && (
           <span className="shimmer-text text-xs">{t("agent.waitingApproval")}</span>
         )}
@@ -185,12 +193,22 @@ function NeedsDesktop() {
       <div className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-300">
         <Laptop size={18} /> {t("agent.installDesktop")}
       </div>
+      <a
+        href={DESKTOP_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-2 rounded-md bg-violet-600 px-4 py-2 text-sm text-white hover:bg-violet-500"
+      >
+        <Download size={16} /> {t("agent.getDesktop")}
+      </a>
     </div>
   );
 }
 
 export default function AgentPage() {
   const { t } = useI18n();
+  const { me } = useAuth();
+  const sendWithEnter = me.preferences.send_with_enter;
   const [hasDesktop, setHasDesktop] = useState<boolean | null>(null);
   const [models, setModels] = useState<AgentModel[]>([]);
   const [model, setModel] = useState("");
@@ -199,6 +217,7 @@ export default function AgentPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const agent = useAgent(model, folder?.name ?? null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const startedAt = useRef(0);
 
   useEffect(() => {
     setHasDesktop(!!getDesktop());
@@ -233,12 +252,15 @@ export default function AgentPage() {
     }
   }
 
-  function submit() {
-    if (!input.trim() || agent.running || !folder) return;
+  function start(text: string) {
+    if (!text.trim() || agent.running || !folder) return;
     setNotice(null);
-    agent.run(input);
+    startedAt.current = Date.now();
+    agent.run(text);
     setInput("");
   }
+
+  const submit = () => start(input);
 
   return (
     <div className="flex h-full flex-col">
@@ -246,12 +268,17 @@ export default function AgentPage() {
         <button
           onClick={pick}
           disabled={agent.running}
-          className="flex items-center gap-2 rounded-md border border-neutral-700 px-3 py-1.5 text-sm hover:border-violet-500 disabled:opacity-50"
+          title={folder?.path}
+          className="flex min-w-0 max-w-[16rem] items-center gap-2 rounded-md border border-neutral-700 px-3 py-1.5 text-sm hover:border-violet-500 disabled:opacity-50"
         >
-          <FolderOpen size={15} className="text-violet-300" />
-          {folder ? folder.name : t("agent.pickFolder")}
+          <FolderOpen size={15} className="shrink-0 text-violet-300" />
+          <span className="truncate">{folder ? folder.name : t("agent.pickFolder")}</span>
         </button>
-        {folder && <span className="hidden truncate text-xs text-neutral-500 md:inline">{folder.path}</span>}
+        {folder && (
+          <span title={folder.path} className="hidden min-w-0 max-w-[18rem] truncate text-xs text-neutral-500 lg:inline-block">
+            {folder.path}
+          </span>
+        )}
         {folder && getDesktop()?.openTerminal && (
           <button
             onClick={async () => {
@@ -259,7 +286,7 @@ export default function AgentPage() {
               setNotice(r.ok ? null : (r.error ?? null));
             }}
             title={t("agent.terminalHint")}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50"
+            className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50"
           >
             <SquareTerminal size={14} /> {t("agent.terminal")}
           </button>
@@ -273,8 +300,8 @@ export default function AgentPage() {
           <ModelSelector
             models={models}
             value={model}
-            disabled={agent.started}
-            title={agent.started ? t("agent.modelLocked") : undefined}
+            disabled={!!agent.session}
+            title={agent.session ? t("agent.modelLocked") : undefined}
             onChange={(id) => {
               setModel(id);
               try {
@@ -288,7 +315,7 @@ export default function AgentPage() {
         <button
           onClick={agent.reset}
           disabled={agent.running || !agent.started}
-          className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-40"
+          className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-40"
         >
           <Plus size={14} /> {t("agent.newSession")}
         </button>
@@ -335,14 +362,14 @@ export default function AgentPage() {
           if (it.kind === "user")
             return (
               <div key={it.id} className="msg-in flex justify-end">
-                <p className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-blue-600 text-white px-4 py-2">{it.text}</p>
+                <p className="min-w-0 max-w-[85%] whitespace-pre-wrap rounded-lg bg-blue-600 text-white px-4 py-2 [overflow-wrap:anywhere]">{it.text}</p>
               </div>
             );
           if (it.kind === "text")
             return (
               <div
                 key={it.id}
-                className="msg-in max-w-[90%] rounded-lg bg-neutral-800 px-4 py-2"
+                className="msg-in min-w-0 max-w-[90%] rounded-lg bg-neutral-800 px-4 py-2 [overflow-wrap:anywhere]"
                 style={{ boxShadow: `inset 3px 0 0 ${colorOf(provider)}` }}
               >
                 <Markdown>{it.text}</Markdown>
@@ -350,7 +377,7 @@ export default function AgentPage() {
             );
           if (it.kind === "note")
             return (
-              <p key={it.id} className={`msg-in text-center text-xs ${it.tone === "error" ? "text-red-400" : "text-neutral-500"}`}>
+              <p key={it.id} className={`msg-in text-center text-xs [overflow-wrap:anywhere] ${it.tone === "error" ? "text-red-400" : "text-neutral-500"}`}>
                 {it.text}
               </p>
             );
@@ -373,19 +400,35 @@ export default function AgentPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            // Sozlamaga qarab (chatdagidek): Enter yoki Ctrl/⌘+Enter yuboradi
+            const send = sendWithEnter ? !e.shiftKey : e.ctrlKey || e.metaKey;
+            if (e.key === "Enter" && send && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
             }
           }}
           disabled={!folder}
           rows={2}
-          placeholder={folder ? t("agent.placeholder") : t("agent.placeholderNoFolder")}
+          placeholder={folder ? t(sendWithEnter ? "agent.placeholder" : "agent.placeholderNoEnter") : t("agent.placeholderNoFolder")}
           className="flex-1 resize-none rounded-md border border-neutral-700 bg-neutral-950 p-2 text-sm disabled:opacity-50"
         />
-        <VoiceButton onText={(t) => setInput((p) => (p ? `${p.trimEnd()} ${t}` : t))} onError={setNotice} />
+        {/* Papka tanlanmaguncha mikrofon ham o'chiq (fieldset ichidagi tugma disabled bo'ladi) */}
+        <fieldset disabled={!folder} className="contents">
+          <VoiceButton
+            onText={(v) => {
+              // Sozlamaga qarab: ovoz matni darhol yuboriladi yoki kiritish maydoniga qo'shiladi
+              if (me.preferences.voice_auto_send && !agent.running) start(input.trim() ? `${input.trimEnd()} ${v}` : v);
+              else setInput((p) => (p ? `${p.trimEnd()} ${v}` : v));
+            }}
+            onError={setNotice}
+          />
+        </fieldset>
         {agent.running ? (
-          <button onClick={agent.stop} aria-label={t("chat.stop")} className="rounded-md bg-neutral-700 px-4">
+          <button
+            onClick={() => Date.now() - startedAt.current > STOP_GUARD_MS && agent.stop()}
+            aria-label={t("chat.stop")}
+            className="rounded-md bg-neutral-700 px-4"
+          >
             <Square size={16} />
           </button>
         ) : (

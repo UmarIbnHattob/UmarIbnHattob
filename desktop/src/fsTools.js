@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const { tr } = require("./i18n");
 
 const MAX_READ = 256 * 1024; // 256 KB
 const MAX_LIST = 500;
@@ -14,27 +15,39 @@ const MAX_CMD_OUTPUT = 20 * 1024;
 const CMD_TIMEOUT_MS = 120_000;
 const SKIP_DIRS = new Set([".git", "node_modules", ".next", "dist", "build", ".venv", "venv", "__pycache__", ".cache"]);
 
-class ToolError extends Error {}
+/** Foydalanuvchiga ko'rsatiladigan xato. `key` — i18n kaliti: matn keyin foydalanuvchi tilida olinadi (errorText). */
+class ToolError extends Error {
+  constructor(key, vars) {
+    super(tr("uz", key, vars));
+    this.key = key;
+    this.vars = vars;
+  }
+}
+
+/** Xato matni foydalanuvchi tilida (kutilmagan xatolar "Xato: ..." ko'rinishida). */
+function errorText(err, lang) {
+  return err instanceof ToolError ? tr(lang, err.key, err.vars) : tr(lang, "fs.error", { msg: err.message });
+}
 
 /**
  * Nisbiy yo'lni ildiz ichidagi absolyut yo'lga aylantiradi.
  * `../` yoki symlink orqali ildizdan tashqariga chiqish taqiqlanadi.
  */
 function resolveInside(root, rel, { mustExist = false } = {}) {
-  if (typeof rel !== "string" || rel.includes("\0")) throw new ToolError("Yo'l noto'g'ri");
-  if (path.isAbsolute(rel)) throw new ToolError("Faqat nisbiy yo'l ishlatiladi (masalan 'src/app.js')");
+  if (typeof rel !== "string" || rel.includes("\0")) throw new ToolError("fs.badPath");
+  if (path.isAbsolute(rel)) throw new ToolError("fs.relativeOnly");
   const realRoot = fs.realpathSync(root);
   const target = path.resolve(realRoot, rel || ".");
   const inside = (p) => p === realRoot || p.startsWith(realRoot + path.sep);
-  if (!inside(target)) throw new ToolError("Loyiha papkasidan tashqariga chiqish mumkin emas");
+  if (!inside(target)) throw new ToolError("fs.outside");
 
   // Mavjud eng yaqin ota-papkaning haqiqiy yo'lini tekshiramiz (symlink tashqariga olib chiqmasin)
   let probe = target;
   while (!fs.existsSync(probe)) {
-    if (mustExist) throw new ToolError(`Topilmadi: ${rel}`);
+    if (mustExist) throw new ToolError("fs.notFound", { path: rel });
     probe = path.dirname(probe);
   }
-  if (!inside(fs.realpathSync(probe))) throw new ToolError("Symlink loyiha papkasidan tashqariga olib chiqadi");
+  if (!inside(fs.realpathSync(probe))) throw new ToolError("fs.symlinkOutside");
   return target;
 }
 
@@ -46,53 +59,52 @@ function looksBinary(buf) {
   return false;
 }
 
-async function listDir(root, { path: rel = "." }) {
-  const abs = resolveInside(root, rel, { mustExist: true });
+// Asboblar: (root, args, T) — T(kalit, qiymatlar) natija matnini foydalanuvchi tilida beradi.
+// Argumentlar oldindan checkArgs da tekshirilgan bo'ladi.
+async function listDir(root, { path: rel }, T) {
+  const abs = resolveInside(root, rel ?? ".", { mustExist: true });
   const entries = await fsp.readdir(abs, { withFileTypes: true });
   entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
   const lines = entries.slice(0, MAX_LIST).map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
-  if (entries.length > MAX_LIST) lines.push(`… yana ${entries.length - MAX_LIST} ta`);
-  return lines.join("\n") || "(bo'sh papka)";
+  if (entries.length > MAX_LIST) lines.push(T("fs.moreEntries", { n: entries.length - MAX_LIST }));
+  return lines.join("\n") || T("fs.emptyDir");
 }
 
-async function readFile(root, { path: rel }) {
+async function readFile(root, { path: rel }, T) {
   const abs = resolveInside(root, rel, { mustExist: true });
   const stat = await fsp.stat(abs);
-  if (stat.isDirectory()) throw new ToolError("Bu papka, fayl emas — list_dir ishlating");
+  if (stat.isDirectory()) throw new ToolError("fs.isDir");
   const fh = await fsp.open(abs, "r");
   try {
     const buf = Buffer.alloc(Math.min(stat.size, MAX_READ));
     await fh.read(buf, 0, buf.length, 0);
-    if (looksBinary(buf)) return `(ikkilik fayl, ${stat.size} bayt — o'qilmadi)`;
+    if (looksBinary(buf)) return T("fs.binary", { size: stat.size });
     const text = buf.toString("utf8");
-    return stat.size > MAX_READ ? `${text}\n\n… (fayl ${stat.size} bayt, faqat birinchi ${MAX_READ} bayt ko'rsatildi)` : text;
+    return stat.size > MAX_READ ? `${text}\n\n${T("fs.truncated", { size: stat.size, max: MAX_READ })}` : text;
   } finally {
     await fh.close();
   }
 }
 
-async function writeFile(root, { path: rel, content }) {
-  if (typeof content !== "string") throw new ToolError("content matn bo'lishi kerak");
+async function writeFile(root, { path: rel, content }, T) {
   const abs = resolveInside(root, rel);
   await fsp.mkdir(path.dirname(abs), { recursive: true });
   await fsp.writeFile(abs, content, "utf8");
-  return `Yozildi: ${relOf(root, abs)} (${Buffer.byteLength(content)} bayt)`;
+  return T("fs.written", { path: relOf(root, abs), n: Buffer.byteLength(content) });
 }
 
-async function editFile(root, { path: rel, old_text: oldText, new_text: newText }) {
-  if (typeof oldText !== "string" || !oldText) throw new ToolError("old_text bo'sh bo'lmasligi kerak");
+async function editFile(root, { path: rel, old_text: oldText, new_text: newText }, T) {
   const abs = resolveInside(root, rel, { mustExist: true });
   const text = await fsp.readFile(abs, "utf8");
   const count = text.split(oldText).length - 1;
-  if (count === 0) throw new ToolError("old_text faylda topilmadi — avval faylni o'qing");
-  if (count > 1) throw new ToolError(`old_text faylda ${count} marta uchradi — kengroq, noyob bo'lak bering`);
+  if (count === 0) throw new ToolError("fs.oldTextMissing");
+  if (count > 1) throw new ToolError("fs.oldTextMany", { n: count });
   await fsp.writeFile(abs, text.replace(oldText, () => String(newText ?? "")), "utf8");
-  return `O'zgartirildi: ${relOf(root, abs)}`;
+  return T("fs.edited", { path: relOf(root, abs) });
 }
 
-async function searchFiles(root, { query, path: rel = "." }) {
-  if (!query) throw new ToolError("query bo'sh");
-  const start = resolveInside(root, rel, { mustExist: true });
+async function searchFiles(root, { query, path: rel }, T) {
+  const start = resolveInside(root, rel ?? ".", { mustExist: true });
   const q = String(query).toLowerCase();
   const out = [];
   async function walk(dir) {
@@ -117,32 +129,47 @@ async function searchFiles(root, { query, path: rel = "." }) {
     }
   }
   await walk(start);
-  if (!out.length) return "Hech narsa topilmadi";
-  return out.join("\n") + (out.length >= MAX_MATCHES ? `\n… (birinchi ${MAX_MATCHES} ta natija)` : "");
+  if (!out.length) return T("fs.noMatches");
+  return out.join("\n") + (out.length >= MAX_MATCHES ? `\n${T("fs.firstMatches", { n: MAX_MATCHES })}` : "");
 }
 
-function runCommand(root, { command }) {
-  if (!command || typeof command !== "string") throw new ToolError("command bo'sh");
+/** `signal` — foydalanuvchi To'xtatish ni bossa (yoki sahifa qayta yuklansa) buyruq o'ldiriladi. */
+function runCommand(root, { command }, T, signal) {
+  if (signal?.aborted) return T("fs.cancelled");
   return new Promise((resolve) => {
-    const child = spawn(command, { cwd: fs.realpathSync(root), shell: true, windowsHide: true });
+    // POSIX: alohida jarayonlar guruhi — to'xtatilganda shell ichidagi dasturlar (npm, sleep...) ham o'ldiriladi
+    const posix = process.platform !== "win32";
+    const child = spawn(command, { cwd: fs.realpathSync(root), shell: true, windowsHide: true, detached: posix });
     let output = "";
     const add = (d) => {
       if (output.length < MAX_CMD_OUTPUT) output += d.toString();
     };
     child.stdout.on("data", add);
     child.stderr.on("data", add);
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      add(`\n(${CMD_TIMEOUT_MS / 1000}s vaqt tugadi — to'xtatildi)`);
-    }, CMD_TIMEOUT_MS);
-    child.on("close", (code) => {
+    const kill = (note) => {
+      try {
+        if (posix) process.kill(-child.pid, "SIGKILL");
+        else spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }).on("error", () => child.kill("SIGKILL"));
+      } catch {
+        child.kill("SIGKILL");
+      }
+      add(`\n${note}`);
+    };
+    const timer = setTimeout(() => kill(T("fs.timeout", { s: CMD_TIMEOUT_MS / 1000 })), CMD_TIMEOUT_MS);
+    const onAbort = () => kill(T("fs.cancelled"));
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const done = () => {
       clearTimeout(timer);
-      const trimmed = output.length >= MAX_CMD_OUTPUT ? output.slice(0, MAX_CMD_OUTPUT) + "\n… (chiqish qisqartirildi)" : output;
+      signal?.removeEventListener("abort", onAbort);
+    };
+    child.on("close", (code) => {
+      done();
+      const trimmed = output.length >= MAX_CMD_OUTPUT ? `${output.slice(0, MAX_CMD_OUTPUT)}\n${T("fs.outputCut")}` : output;
       resolve(`exit code: ${code}\n${trimmed}`);
     });
     child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve(`Buyruqni ishga tushirib bo'lmadi: ${err.message}`);
+      done();
+      resolve(T("fs.cmdFailed", { msg: err.message }));
     });
   });
 }
@@ -159,15 +186,47 @@ const TOOLS = {
 // Foydalanuvchi ruxsatini talab qiladigan asboblar (ruxsat main.js da, mahalliy oynada so'raladi)
 const NEEDS_APPROVAL = new Set(["write_file", "edit_file", "run_command"]);
 
-/** Asbobni bajaradi. Natija: { output, isError }. Hech qachon istisno tashlamaydi. */
-async function runTool(root, name, args) {
-  const fn = TOOLS[name];
-  if (!fn) return { output: `Noma'lum asbob: ${name}`, isError: true };
-  try {
-    return { output: await fn(root, args || {}), isError: false };
-  } catch (err) {
-    return { output: err instanceof ToolError ? err.message : `Xato: ${err.message}`, isError: true };
+// Argumentlar turi: "path" — loyiha ichidagi yo'l, "text" — bo'sh bo'lmagan matn, "str" — istalgan matn;
+// "?" bilan tugasa — ixtiyoriy.
+const ARGS = {
+  list_dir: { path: "path?" },
+  read_file: { path: "path" },
+  write_file: { path: "path", content: "str" },
+  edit_file: { path: "path", old_text: "text", new_text: "str?" },
+  search_files: { query: "text", path: "path?" },
+  run_command: { command: "text" },
+};
+
+/**
+ * Argumentlarni bajarishdan (va ruxsat so'rashdan) OLDIN tekshiradi: yaroqsiz JSON, yetishmayotgan maydon yoki
+ * papkadan tashqari yo'l uchun foydalanuvchi bezovta qilinmaydi. Xato bo'lsa ToolError tashlaydi.
+ */
+function checkArgs(root, name, args) {
+  if (!TOOLS[name]) throw new ToolError("fs.unknownTool", { name });
+  // Server JSON bo'lmagan argumentlarni {"__invalid_json__": "..."} ko'rinishida yuboradi
+  if (!args || typeof args !== "object" || Array.isArray(args) || "__invalid_json__" in args) throw new ToolError("fs.invalidArgs");
+  for (const [arg, kind] of Object.entries(ARGS[name])) {
+    const v = args[arg];
+    if (v === undefined || v === null) {
+      if (kind.endsWith("?")) continue;
+      throw new ToolError(kind === "str" ? "fs.argString" : "fs.argRequired", { arg });
+    }
+    if (typeof v !== "string") throw new ToolError("fs.argString", { arg });
+    if (v === "" && (kind === "path" || kind === "text")) throw new ToolError("fs.argRequired", { arg });
+    // write_file yangi fayl yaratishi mumkin; qolganlari mavjud yo'l bilan ishlaydi
+    if (kind.startsWith("path")) resolveInside(root, v, { mustExist: name !== "write_file" });
   }
 }
 
-module.exports = { runTool, resolveInside, NEEDS_APPROVAL, ToolError, MAX_READ };
+/** Asbobni bajaradi. Natija: { output, isError }, matnlar `lang` tilida. Hech qachon istisno tashlamaydi. */
+async function runTool(root, name, args, lang = "uz", signal = undefined) {
+  const T = (key, vars) => tr(lang, key, vars);
+  try {
+    checkArgs(root, name, args ?? {});
+    return { output: await TOOLS[name](root, args ?? {}, T, signal), isError: false };
+  } catch (err) {
+    return { output: errorText(err, lang), isError: true };
+  }
+}
+
+module.exports = { runTool, checkArgs, errorText, resolveInside, NEEDS_APPROVAL, ToolError, MAX_READ };

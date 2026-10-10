@@ -4,22 +4,23 @@
 
 const fs = require("node:fs");
 const { resolveInside } = require("./fsTools");
+const { tr } = require("./i18n");
 
 const PREVIEW_LINES = 8;
 const LINE_CHARS = 110;
 
-function head(text, lines = PREVIEW_LINES) {
+function head(T, text, lines = PREVIEW_LINES) {
   const all = String(text ?? "").split("\n");
   const shown = all.slice(0, lines).map((l) => (l.length > LINE_CHARS ? l.slice(0, LINE_CHARS) + "…" : l));
-  if (all.length > lines) shown.push(`… (yana ${all.length - lines} qator)`);
+  if (all.length > lines) shown.push(T("ap.more", { n: all.length - lines }));
   return shown.join("\n");
 }
 
-function size(text) {
+function size(T, text) {
   const s = String(text ?? "");
   const lines = s.split("\n").length;
   const kb = Buffer.byteLength(s) / 1024;
-  return `${lines} qator, ${kb < 1 ? "<1" : kb.toFixed(1)} KB`;
+  return T("ap.size", { lines, kb: kb < 1 ? "<1" : kb.toFixed(1) });
 }
 
 function exists(root, rel) {
@@ -30,22 +31,26 @@ function exists(root, rel) {
   }
 }
 
-/** Ruxsat oynasi uchun { title, detail }. detail doim ~1500 belgidan qisqa. */
-function describe(root, name, args) {
+/**
+ * Ruxsat oynasi uchun { title, detail } (`lang` tilida). detail doim ~1500 belgidan qisqa.
+ * Argumentlar oldindan fsTools.checkArgs da tekshirilgan bo'ladi.
+ */
+function describe(root, name, args, lang = "uz") {
+  const T = (key, vars) => tr(lang, key, vars);
   if (name === "run_command") {
     const cmd = String(args.command ?? "");
-    return { title: "Terminal buyrug'ini ishga tushirish", detail: cmd.length > 500 ? cmd.slice(0, 500) + "…" : cmd };
+    return { title: T("ap.run"), detail: cmd.length > 500 ? cmd.slice(0, 500) + "…" : cmd };
   }
   if (name === "write_file") {
     const replacing = exists(root, args.path);
     return {
-      title: replacing ? `Mavjud faylni qayta yozish: ${args.path}` : `Yangi fayl yaratish: ${args.path}`,
-      detail: `${size(args.content)}${replacing ? " — eski mazmun almashtiriladi" : ""}\n\nBoshlanishi:\n${head(args.content)}`,
+      title: T(replacing ? "ap.overwrite" : "ap.create", { path: args.path }),
+      detail: `${size(T, args.content)}${replacing ? T("ap.replaced") : ""}\n\n${T("ap.start")}\n${head(T, args.content)}`,
     };
   }
   return {
-    title: `Faylni o'zgartirish: ${args.path}`,
-    detail: `Olib tashlanadi:\n${head(args.old_text, 6)}\n\nO'rniga yoziladi:\n${head(args.new_text, 6)}`,
+    title: T("ap.edit", { path: args.path }),
+    detail: `${T("ap.removed")}\n${head(T, args.old_text, 6)}\n\n${T("ap.inserted")}\n${head(T, args.new_text, 6)}`,
   };
 }
 
