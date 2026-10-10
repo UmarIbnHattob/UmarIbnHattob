@@ -136,10 +136,13 @@ export function useAgent(model: string, folder: string | null) {
           if (bad) return { output: t(bad), isError: true };
           const img = await apiFetch<{ data: string; mime: string }>("/agent/image", { method: "POST", body: JSON.stringify({ prompt }), signal });
           const finalPath = withMimeExt(path, img.mime);
-          const r = await abortable(desktop.saveImage(finalPath, img.data), signal);
-          if (finalPath === path || r.isError) return r;
+          // Nomni biz o'zgartirgan bo'lsak (model so'ramagan fayl), u band bo'lsa desktop foydalanuvchining
+          // faylini yozib yubormaydi — bo'sh nom tanlaydi (logo-1.png). Model so'ragan nom band bo'lsa — ruxsat so'raladi.
+          const r = await abortable(desktop.saveImage(finalPath, img.data, { unique: finalPath !== path }), signal);
+          const saved = r.path ?? finalPath;
+          if (saved === path || r.isError) return r;
           // Model keyingi qadamlarda (masalan HTML da) to'g'ri fayl nomini ishlatsin
-          return { ...r, output: `${r.output}\n${t("agent.imgRenamed", { from: path, to: finalPath })}`, path: finalPath };
+          return { ...r, output: `${r.output}\n${t("agent.imgRenamed", { from: path, to: saved })}`, path: saved };
         }
         if (name === "ask_expert") {
           const r = await apiFetch<{ answer: string; model: string }>("/agent/expert", {
@@ -167,9 +170,15 @@ export function useAgent(model: string, folder: string | null) {
       const { signal } = ctrl;
       ctrlRef.current = ctrl;
       setRunning(true);
+      const base = messages.current.length;
       messages.current.push({ role: "user", content: text });
       push({ kind: "user", id: nid(), text });
-      const stopped = () => push({ kind: "note", id: nid(), text: t("agent.stopped"), tone: "info" });
+      const stopped = () => {
+        // Model bu buyruqqa hali javob bermagan bo'lsa — u tarixdan olib tashlanadi. Aks holda keyingi vazifa bilan
+        // birlashib (ketma-ket user xabarlari), model bekor qilingan buyruqni ham bajarib yuboradi.
+        if (messages.current.length === base + 1) messages.current.splice(base);
+        push({ kind: "note", id: nid(), text: t("agent.stopped"), tone: "info" });
+      };
       try {
         for (let step = 0; ; step++) {
           if (signal.aborted) {

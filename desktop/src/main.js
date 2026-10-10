@@ -5,7 +5,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, net, shell, session } = require("electron");
 const path = require("node:path");
 const { resolveInside, errorText } = require("./fsTools");
-const { newState, cancelJobs, resetOnNavigation, callTool, saveImage } = require("./bridge");
+const { newState, cancelJobs, resetFolder, resetOnNavigation, callTool, saveImage } = require("./bridge");
 const { tr, normLang } = require("./i18n");
 
 // Qaysi serverga ulanish: OMNIAI_URL muhit o'zgaruvchisi > package.json dagi standart
@@ -42,6 +42,9 @@ function createWindow() {
   // Sahifa qayta yuklansa yoki renderer qulasa: papka va "qayta so'rama" ruxsatlari bekor qilinadi
   resetOnNavigation(win.webContents, s);
   win.on("closed", () => {
+    // Ishlayotgan buyruqlar o'ldiriladi (ular alohida jarayonlar guruhida — oyna bilan o'zi to'xtamaydi);
+    // papka ham unutiladi: yopilish paytida ochiq qolgan ruxsat oynasining javobi endi bajarilmaydi
+    resetFolder(s);
     state.delete(wcId);
     stopRetry(win);
   });
@@ -116,8 +119,11 @@ ipcMain.on("omni:lang", (event, lang) => {
   Menu.setApplicationMenu(buildMenu(s.lang));
 });
 
-/** Ruxsat oynasi (bridge.callTool / saveImage uchun): { approved, remember } qaytaradi. */
-function askApproval(event, s, kind, { title, detail, root, image }) {
+/**
+ * Ruxsat oynasi (bridge.callTool / saveImage uchun): { approved, remember } qaytaradi.
+ * overwrite — mavjud rasmni qayta yozish: standart tugma "Rad etish", "qayta so'rama" belgisi yo'q (har safar so'raladi).
+ */
+function askApproval(event, s, kind, { title, detail, root, image, overwrite }) {
   const T = (key, vars) => tr(s.lang, key, vars);
   const win = BrowserWindow.fromWebContents(event.sender);
   return dialog
@@ -128,9 +134,9 @@ function askApproval(event, s, kind, { title, detail, root, image }) {
       detail: `${T("dialog.folder", { root })}\n\n${detail}`,
       noLink: true,
       buttons: [T("dialog.allow"), T("dialog.deny")],
-      defaultId: image ? 0 : 1,
+      defaultId: image && !overwrite ? 0 : 1,
       cancelId: 1,
-      checkboxLabel: T(image ? "dialog.dontAskImages" : "dialog.dontAsk"),
+      ...(overwrite ? {} : { checkboxLabel: T(image ? "dialog.dontAskImages" : "dialog.dontAsk") }),
     })
     .then((res) => ({ approved: res.response === 0, remember: res.checkboxChecked }));
 }
@@ -181,11 +187,12 @@ ipcMain.handle("omni:open", async (event, rel) => {
   }
 });
 
-// generate_image asbobi: server yaratgan rasmni papkaga saqlash (ruxsat bilan, faqat rasm formatlari)
-ipcMain.handle("omni:saveImage", async (event, rel, b64) => {
+// generate_image asbobi: server yaratgan rasmni papkaga saqlash (ruxsat bilan, faqat rasm formatlari).
+// opts.unique — nomni ilova o'zgartirgan (.webp -> .png): band bo'lsa mavjud fayl ustiga yozilmaydi.
+ipcMain.handle("omni:saveImage", async (event, rel, b64, opts) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
   const s = state.get(event.sender.id);
-  return saveImage(s, rel, b64, (req) => askApproval(event, s, "save_image", req));
+  return saveImage(s, rel, b64, (req) => askApproval(event, s, "save_image", req), { unique: opts?.unique === true });
 });
 
 // Papkada tizim terminalini ochish (foydalanuvchi u yerda o'zi buyruq yozadi, masalan rasmiy "claude" CLI)
@@ -278,6 +285,8 @@ function buildMenu(lang = "uz") {
       ],
     },
     {
+      // role — macOS uchun standart Edit menyusi belgisi; yorliq va ichki menyu interfeys tilida beriladi
+      role: "editMenu",
       label: T("menu.edit"),
       submenu: [
         { role: "undo", label: T("menu.undo") },
@@ -305,6 +314,8 @@ function buildMenu(lang = "uz") {
       ],
     },
     {
+      // role: macOS da bu tizimning Window menyusi (ochiq oynalar ro'yxati shu yerga qo'shiladi)
+      role: "windowMenu",
       label: T("menu.window"),
       submenu: [
         { role: "minimize", label: T("menu.minimize") },
@@ -343,4 +354,8 @@ if (!app.requestSingleInstanceLock()) {
     app.on("activate", () => BrowserWindow.getAllWindows().length === 0 && createWindow());
   });
   app.on("window-all-closed", () => process.platform !== "darwin" && app.quit());
+  // Ilovadan chiqishda hech bir buyruq fonda qolib ketmasin (oynalar "closed" da ham tozalanadi)
+  app.on("will-quit", () => {
+    for (const s of state.values()) resetFolder(s);
+  });
 }

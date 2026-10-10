@@ -2,6 +2,7 @@
 // oyna holati, sahifa almashganda tozalash va asbob chaqiruvi tartibi (tekshiruv -> ruxsat -> bajarish).
 "use strict";
 
+const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { runTool, checkArgs, errorText, resolveInside, NEEDS_APPROVAL } = require("./fsTools");
@@ -70,26 +71,55 @@ async function callTool(s, name, args, ask) {
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const MAX_IMAGE = 15 * 1024 * 1024;
 
-/** Server yaratgan rasmni papkaga saqlaydi (ruxsat bilan). */
-async function saveImage(s, rel, b64, ask) {
+/** "assets/logo.png" band bo'lsa — birinchi bo'sh nom: "assets/logo-1.png", "assets/logo-2.png", ... */
+function freeName(root, rel) {
+  const ext = path.extname(rel);
+  const stem = rel.slice(0, rel.length - ext.length);
+  for (let i = 1; i < 1000; i++) {
+    const name = `${stem}-${i}${ext}`;
+    if (!fs.existsSync(resolveInside(root, name))) return name;
+  }
+  return rel; // bo'sh nom topilmadi — mavjud faylni qayta yozish uchun ruxsat so'raladi
+}
+
+/**
+ * Server yaratgan rasmni papkaga saqlaydi (ruxsat bilan). Mavjud faylni qayta yozish uchun ruxsat HAR DOIM
+ * so'raladi ("rasmlar uchun qayta so'rama" tanlangan bo'lsa ham).
+ * unique: nomni AI emas, ilova o'zgartirgan (masalan logo.webp -> logo.png, rasm PNG bo'lib keldi) — bunday nom
+ * band bo'lsa foydalanuvchining fayli ustiga yozilmaydi, bo'sh nom (logo-1.png) tanlanadi.
+ * Natijadagi `path` — rasm qaysi nom bilan saqlangani.
+ */
+async function saveImage(s, rel, b64, ask, { unique = false } = {}) {
   const T = (key, vars) => tr(s.lang, key, vars);
   if (!s.root) return { output: T("pickFirst"), isError: true };
   const root = s.root;
   try {
-    const abs = resolveInside(root, String(rel));
+    rel = String(rel);
+    let abs = resolveInside(root, rel);
     if (!IMAGE_EXT.has(path.extname(abs).toLowerCase())) return { output: T("image.extOnly"), isError: true };
     const data = Buffer.from(String(b64), "base64");
     if (data.length > MAX_IMAGE) return { output: T("image.tooBig"), isError: true };
     const kb = (data.length / 1024).toFixed(0);
-    if (!s.autoApprove.has("save_image")) {
-      const { approved, remember } = await ask({ title: T("image.title", { path: rel }), detail: T("image.detail", { kb }), root, image: true });
+    if (unique && fs.existsSync(abs)) {
+      rel = freeName(root, rel);
+      abs = resolveInside(root, rel);
+    }
+    const overwrite = fs.existsSync(abs);
+    if (overwrite || !s.autoApprove.has("save_image")) {
+      const { approved, remember } = await ask({
+        title: T(overwrite ? "image.overwrite" : "image.title", { path: rel }),
+        detail: T("image.detail", { kb }) + (overwrite ? T("ap.replaced") : ""),
+        root,
+        image: true,
+        overwrite,
+      });
       if (!approved) return { output: T("image.denied"), isError: true };
       if (s.root !== root) return { output: T("folderChanged"), isError: true };
-      if (remember) s.autoApprove.add("save_image");
+      if (remember && !overwrite) s.autoApprove.add("save_image");
     }
     await fsp.mkdir(path.dirname(abs), { recursive: true });
     await fsp.writeFile(abs, data);
-    return { output: T("image.saved", { path: rel, kb }), isError: false };
+    return { output: T("image.saved", { path: rel, kb }), isError: false, path: rel };
   } catch (e) {
     return { output: errorText(e, s.lang), isError: true };
   }

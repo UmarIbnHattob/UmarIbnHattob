@@ -3,7 +3,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("omniDesktop", {
-  version: 5,
+  version: 6,
   platform: process.platform,
   /** Papka tanlash dialogi. Natija: { name, path } yoki null. */
   pickFolder: () => ipcRenderer.invoke("omni:pickFolder"),
@@ -13,8 +13,11 @@ contextBridge.exposeInMainWorld("omniDesktop", {
   open: (relPath) => ipcRenderer.invoke("omni:open", relPath),
   /** Faylni fayl menejerida ko'rsatish. */
   reveal: (relPath) => ipcRenderer.invoke("omni:reveal", relPath),
-  /** AI yaratgan rasmni papkaga saqlash (ruxsat bilan). */
-  saveImage: (relPath, base64) => ipcRenderer.invoke("omni:saveImage", relPath, base64),
+  /**
+   * AI yaratgan rasmni papkaga saqlash (ruxsat bilan). opts.unique: nom band bo'lsa yangi nom tanlanadi (logo-1.png).
+   * Natija: { output, isError, path } — path: rasm qaysi nom bilan saqlangani.
+   */
+  saveImage: (relPath, base64, opts) => ipcRenderer.invoke("omni:saveImage", relPath, base64, { unique: opts?.unique === true }),
   /** Tanlangan papkada tizim terminalini ochish. */
   openTerminal: () => ipcRenderer.invoke("omni:openTerminal"),
   /** To'xtatish: ishlayotgan asboblarni (masalan uzoq buyruqni) bekor qilish. */
