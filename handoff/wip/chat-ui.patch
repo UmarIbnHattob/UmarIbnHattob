@@ -265,7 +265,7 @@ index 43d96fa..790f54a 100644
        />
      </div>
 diff --git a/frontend/src/components/ChatView.tsx b/frontend/src/components/ChatView.tsx
-index 1c042eb..0ba84fd 100644
+index 1c042eb..477006e 100644
 --- a/frontend/src/components/ChatView.tsx
 +++ b/frontend/src/components/ChatView.tsx
 @@ -1,19 +1,23 @@
@@ -367,7 +367,7 @@ index 1c042eb..0ba84fd 100644
  
    // Server so'rovni rad etganda (masalan kalit yo'q) yozilgan matn kiritish maydoniga qaytadi
    useEffect(() => {
-@@ -92,270 +125,366 @@ export default function ChatView() {
+@@ -92,270 +125,373 @@ export default function ChatView() {
      if (nearBottom.current) bottomRef.current?.scrollIntoView({ block: "end" });
    }, [chat.messages]);
  
@@ -375,6 +375,13 @@ index 1c042eb..0ba84fd 100644
 +
    const currentModel = chat.models.find((m) => m.id === chat.model);
 +  const overlay = !fits; // yonma-yon joy yetmaydi: panel chat ustidan ochiladi
++
++  // Oyna torayib yonma-yon joy qolmasa, ochiq panel chatni to'sib qo'ymasin: yopamiz (tugma bilan qayta ochiladi)
++  const fitted = useRef(fits);
++  useEffect(() => {
++    if (fitted.current && !fits) setPanelOpen(false);
++    fitted.current = fits;
++  }, [fits]);
  
 -  function openTab(t: Tab) {
 -    setTab(t);
@@ -445,7 +452,7 @@ index 1c042eb..0ba84fd 100644
    const visionWarning = attachCanvas && currentModel && !currentModel.vision;
 +  const showStop = chat.streaming && !flying;
 +
-+  const tabButton = (id: Tab, Icon: typeof Eye, label: string) => {
++  const tabButton = (id: Tab, Icon: typeof Eye, label: string, wide = false) => {
 +    const on = panelOpen && tab === id;
 +    return (
 +      <button
@@ -457,7 +464,7 @@ index 1c042eb..0ba84fd 100644
 +          on ? "bg-neutral-800 text-neutral-50" : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50"
 +        }`}
 +      >
-+        <Icon size={14} className={on ? "text-violet-400" : ""} /> <span className="hidden sm:inline">{label}</span>
++        <Icon size={14} className={on ? "text-violet-400" : ""} /> <span className={wide ? "" : "hidden sm:inline"}>{label}</span>
 +      </button>
 +    );
 +  };
@@ -514,25 +521,12 @@ index 1c042eb..0ba84fd 100644
 -        <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 p-3">
 -          <ModelSelector models={chat.models} value={chat.model} onChange={chat.setModel} />
 -          <div className="ml-auto flex items-center gap-1">
--            <button
--              onClick={() => openTab("preview")}
--              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
--            >
--              <Eye size={14} /> {t("chat.preview")}
--            </button>
--            <button
--              onClick={() => openTab("canvas")}
--              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
--            >
--              <PenTool size={14} /> {t("chat.canvas")}
--            </button>
 +      <div ref={containerRef} className="relative flex min-w-0 flex-1">
 +        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 +          <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 p-2 sm:p-3">
              <button
--              onClick={() => setPanelOpen((o) => !o)}
--              aria-label={t("chat.togglePanel")}
--              className="rounded p-1 text-neutral-400 hover:bg-neutral-800"
+-              onClick={() => openTab("preview")}
+-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
 +              ref={listBtnRef}
 +              onClick={() => setListOpen(true)}
 +              aria-label={t("chat.conversations")}
@@ -541,6 +535,19 @@ index 1c042eb..0ba84fd 100644
 +              aria-controls="chat-list"
 +              className="rounded-md p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50 lg:hidden"
              >
+-              <Eye size={14} /> {t("chat.preview")}
+-            </button>
+-            <button
+-              onClick={() => openTab("canvas")}
+-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+-            >
+-              <PenTool size={14} /> {t("chat.canvas")}
+-            </button>
+-            <button
+-              onClick={() => setPanelOpen((o) => !o)}
+-              aria-label={t("chat.togglePanel")}
+-              className="rounded p-1 text-neutral-400 hover:bg-neutral-800"
+-            >
 -              {panelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
 +              <MessagesSquare size={18} />
              </button>
@@ -933,8 +940,8 @@ index 1c042eb..0ba84fd 100644
 +            >
 +              {overlay && (
 +                <div className="flex items-center gap-1 border-b border-neutral-800 p-2">
-+                  {tabButton("preview", Eye, t("chat.preview"))}
-+                  {tabButton("canvas", PenTool, t("chat.canvas"))}
++                  {tabButton("preview", Eye, t("chat.preview"), true)}
++                  {tabButton("canvas", PenTool, t("chat.canvas"), true)}
 +                  <button
 +                    onClick={() => setPanelOpen(false)}
 +                    aria-label={t("chat.closePanel")}
@@ -2230,16 +2237,21 @@ index 0000000..8b3a563
 +  }, [open, panelRef, triggerRef, closeAt]);
 +}
 diff --git a/frontend/src/hooks/useResizable.ts b/frontend/src/hooks/useResizable.ts
-index 16b8a8f..e27dd95 100644
+index 16b8a8f..498f033 100644
 --- a/frontend/src/hooks/useResizable.ts
 +++ b/frontend/src/hooks/useResizable.ts
-@@ -2,42 +2,70 @@
+@@ -1,43 +1,74 @@
+ "use client";
  
- import { useCallback, useEffect, useRef, useState } from "react";
+-import { useCallback, useEffect, useRef, useState } from "react";
++import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
  
 -/** Ikki panel orasidagi sudraladigan ajratgich: o'ng panel kengligini (px) boshqaradi. */
 -export function useResizable(initial = 520, min = 320, maxRatio = 0.75) {
 -  const [width, setWidth] = useState(initial);
++// O'lchov birinchi chizishdan oldin olinadi (aks holda bir kadr panel noto'g'ri joyda ko'rinadi)
++const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
++
 +/**
 + * Ikki panel orasidagi sudraladigan ajratgich: o'ng panel kengligini (px) boshqaradi.
 + * Kenglik doim konteynerga moslanadi (oyna o'zgarsa ham): chap tomonda kamida `keep` px qoladi.
@@ -2254,7 +2266,7 @@ index 16b8a8f..e27dd95 100644
  
 -  const onMouseDown = useCallback((e: React.MouseEvent) => {
 +  // Konteyner kengligini kuzatamiz: oyna kichraysa panel ham kichrayadi, chat ustuni yo'qolib qolmaydi
-+  useEffect(() => {
++  useIsoLayoutEffect(() => {
 +    const el = containerRef.current;
 +    if (!el) return;
 +    const measure = () => setAvailable(el.getBoundingClientRect().width);

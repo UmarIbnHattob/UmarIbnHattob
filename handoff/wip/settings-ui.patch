@@ -1,3 +1,455 @@
+diff --git a/frontend/src/app/settings/page.tsx b/frontend/src/app/settings/page.tsx
+index 2a4e3b3..d044c35 100644
+--- a/frontend/src/app/settings/page.tsx
++++ b/frontend/src/app/settings/page.tsx
+@@ -4,7 +4,7 @@ import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+ import { usePathname, useRouter, useSearchParams } from "next/navigation";
+ import { BarChart3, Brain, Keyboard, KeyRound, Laptop, Shield, SlidersHorizontal, UserRound } from "lucide-react";
+ import { useI18n, type TKey } from "@/lib/i18n";
+-import { ToastProvider } from "@/components/settings/ui";
++import { Section, ToastProvider } from "@/components/settings/ui";
+ import GeneralTab from "@/components/settings/GeneralTab";
+ import AiTab from "@/components/settings/AiTab";
+ import KeysTab from "@/components/settings/KeysTab";
+@@ -14,6 +14,16 @@ import PrivacyTab from "@/components/settings/PrivacyTab";
+ import DesktopTab from "@/components/settings/DesktopTab";
+ import { ShortcutsList } from "@/components/Modals";
+ 
++/** Tezkor tugmalar bo'limi: boshqa bo'limlar kabi sarlavha bilan. */
++function ShortcutsTab() {
++  const { t } = useI18n();
++  return (
++    <Section title={t("settings.tab.shortcuts")}>
++      <ShortcutsList plain />
++    </Section>
++  );
++}
++
+ const TABS = [
+   { id: "general", icon: SlidersHorizontal, label: "settings.tab.general", Comp: GeneralTab },
+   { id: "ai", icon: Brain, label: "settings.tab.ai", Comp: AiTab },
+@@ -21,26 +31,56 @@ const TABS = [
+   { id: "usage", icon: BarChart3, label: "settings.tab.usage", Comp: UsageTab },
+   { id: "account", icon: UserRound, label: "settings.tab.account", Comp: AccountTab },
+   { id: "privacy", icon: Shield, label: "settings.tab.privacy", Comp: PrivacyTab },
+-  { id: "shortcuts", icon: Keyboard, label: "settings.tab.shortcuts", Comp: ShortcutsList },
++  { id: "shortcuts", icon: Keyboard, label: "settings.tab.shortcuts", Comp: ShortcutsTab },
+   { id: "desktop", icon: Laptop, label: "settings.tab.desktop", Comp: DesktopTab },
+ ] as const;
+ 
++/** "?tab=providers" bilan kelinganda "Boshqa provayderlar" sarlavhasigacha necha ms davomida kuzatamiz. */
++const PROVIDERS_SCROLL_MS = 3000;
++
+ function SettingsInner() {
+   const { t } = useI18n();
+   const router = useRouter();
+   const pathname = usePathname();
+   const params = useSearchParams();
+   // "providers" eski havola: endi barcha provayderlar "API kalitlar" bo'limida
+-  const asked = params.get("tab") === "providers" ? "keys" : params.get("tab");
++  const wantProviders = params.get("tab") === "providers";
++  const asked = wantProviders ? "keys" : params.get("tab");
+   const active = TABS.find((x) => x.id === asked) ?? TABS[0];
+   const navRef = useRef<HTMLDivElement>(null);
++  const contentRef = useRef<HTMLDivElement>(null);
++  const stripScrolled = useRef(false);
+   const [ind, setInd] = useState<{ top: number; height: number } | null>(null);
+   useEffect(() => {
+     document.title = `${t(active.label as TKey)} — OmniAI`;
+   }, [active, t]);
++
++  // "?tab=providers": sarlavha ustidagi ma'lumotlar (limit, kalitlar) yuklanib sahifa siljisa, qayta to'g'rilaymiz.
++  // ~3 soniyadan keyin yoki foydalanuvchi o'zi aylantira boshlasa — to'xtaymiz.
+   useEffect(() => {
+-    if (params.get("tab") === "providers") setTimeout(() => document.getElementById("providers")?.scrollIntoView({ behavior: "smooth" }), 300);
+-  }, [params]);
++    const box = contentRef.current;
++    if (!wantProviders || !box) return;
++    let timer: ReturnType<typeof setTimeout> | undefined;
++    const scroll = () => document.getElementById("providers")?.scrollIntoView({ behavior: "smooth", block: "start" });
++    const schedule = () => {
++      clearTimeout(timer);
++      timer = setTimeout(scroll, 150);
++    };
++    const ro = new ResizeObserver(schedule);
++    const userEvents = ["wheel", "touchstart", "keydown", "mousedown"] as const;
++    const stop = () => {
++      clearTimeout(timer);
++      clearTimeout(limit);
++      ro.disconnect();
++      userEvents.forEach((ev) => window.removeEventListener(ev, stop));
++    };
++    const limit = setTimeout(stop, PROVIDERS_SCROLL_MS);
++    ro.observe(box);
++    schedule();
++    userEvents.forEach((ev) => window.addEventListener(ev, stop, { passive: true }));
++    return stop;
++  }, [wantProviders]);
++
+   // Ko'rsatkich faol tugmaning HAQIQIY joyiga qo'yiladi (shrift o'lchami/til o'zgarsa ham siljimaydi)
+   useLayoutEffect(() => {
+     const nav = navRef.current;
+@@ -57,16 +97,25 @@ function SettingsInner() {
+     return () => ro.disconnect();
+   }, [active.id]);
+ 
++  // Kichik ekranda bo'limlar gorizontal tasma: faol bo'lim ko'rinadigan joyga suriladi (sahifa o'zi siljimaydi)
++  useEffect(() => {
++    const nav = navRef.current;
++    const btn = nav?.querySelector<HTMLElement>(`[data-tab="${active.id}"]`);
++    if (!nav || !btn || nav.scrollWidth <= nav.clientWidth) return;
++    nav.scrollTo({ left: btn.offsetLeft - (nav.clientWidth - btn.offsetWidth) / 2, behavior: stripScrolled.current ? "smooth" : "auto" });
++    stripScrolled.current = true;
++  }, [active.id]);
++
+   return (
+-    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-6 md:flex-row md:p-8">
+-      <nav className="md:w-52 md:shrink-0">
++    <div className="mx-auto flex max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:flex-row lg:p-8">
++      <nav className="min-w-0 lg:w-52 lg:shrink-0">
+         <h1 className="mb-4 text-2xl font-semibold">{t("settings.title")}</h1>
+-        <div ref={navRef} className="relative flex gap-1 overflow-x-auto md:flex-col md:gap-1 md:overflow-visible">
++        <div ref={navRef} className="relative -mx-1 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0">
+           {/* Faol bo'lim ko'rsatkichi: bo'limlar orasida silliq suriladi */}
+           {ind && (
+             <span
+               aria-hidden
+-              className="tab-indicator absolute left-0 top-0 hidden w-full rounded-md bg-neutral-800 md:block"
++              className="tab-indicator absolute left-0 top-0 hidden w-full rounded-md bg-neutral-800 lg:block"
+               style={{ transform: `translateY(${ind.top}px)`, height: ind.height }}
+             />
+           )}
+@@ -77,7 +126,7 @@ function SettingsInner() {
+               aria-current={tab.id === active.id ? "page" : undefined}
+               onClick={() => router.replace(`${pathname}?tab=${tab.id}`, { scroll: false })}
+               className={`relative z-10 flex h-9 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-violet-500/60 ${
+-                tab.id === active.id ? "bg-neutral-800 text-neutral-50 md:bg-transparent" : "text-neutral-400 hover:text-neutral-100"
++                tab.id === active.id ? "bg-neutral-800 text-neutral-50 lg:bg-transparent" : "text-neutral-400 hover:text-neutral-100"
+               }`}
+             >
+               <tab.icon size={16} />
+@@ -86,7 +135,7 @@ function SettingsInner() {
+           ))}
+         </div>
+       </nav>
+-      <div key={active.id} className="min-w-0 flex-1 md:pt-12">
++      <div ref={contentRef} key={active.id} className="min-w-0 flex-1 lg:pt-12">
+         <active.Comp />
+       </div>
+     </div>
+diff --git a/frontend/src/components/settings/AiTab.tsx b/frontend/src/components/settings/AiTab.tsx
+index 312f0d4..9c5aa35 100644
+--- a/frontend/src/components/settings/AiTab.tsx
++++ b/frontend/src/components/settings/AiTab.tsx
+@@ -1,11 +1,12 @@
+ "use client";
+ 
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
++import Link from "next/link";
++import { AlertTriangle } from "lucide-react";
+ import { useAuth } from "@/components/AuthGate";
++import ModelSelector, { type PickerModel } from "@/components/ModelSelector";
+ import { apiFetch } from "@/lib/api";
+ import { LANGS, useI18n } from "@/lib/i18n";
+-import type { ModelInfo } from "@/lib/chatApi";
+-import { colorOf } from "@/lib/providers";
+ import { btnCls, inputCls, Row, Section, useToast } from "@/components/settings/ui";
+ 
+ const MAX = 3000;
+@@ -14,10 +15,10 @@ export default function AiTab() {
+   const { me, updateMe } = useAuth();
+   const { t } = useI18n();
+   const toast = useToast();
+-  const [models, setModels] = useState<ModelInfo[]>([]);
++  const [models, setModels] = useState<PickerModel[]>([]);
+   const [text, setText] = useState(me.preferences.custom_instructions);
+   useEffect(() => {
+-    apiFetch<ModelInfo[]>("/models").then(setModels).catch(() => {});
++    apiFetch<PickerModel[]>("/models").then(setModels).catch(() => {});
+   }, []);
+ 
+   const save = async (p: Parameters<typeof updateMe>[0]) => {
+@@ -28,23 +29,54 @@ export default function AiTab() {
+       toast((e as Error).message, false);
+     }
+   };
+-  const current = me.preferences.default_model ?? models[0]?.id ?? "";
++
++  // Shaxsiy ko'rsatmalar: maydondan chiqilganda (boshqa bo'limga o'tganda ham) avtomatik saqlanadi,
++  // sahifa yopilayotganda/yangilanayotganda saqlanmagan matn bo'lsa brauzer ogohlantiradi
++  const saved = me.preferences.custom_instructions;
++  const dirty = text !== saved;
++  const latest = useRef({ text, dirty, save });
++  latest.current = { text, dirty, save };
++  const saveText = () => {
++    if (dirty) save({ preferences: { custom_instructions: text } });
++  };
++  useEffect(() => {
++    const warn = (e: BeforeUnloadEvent) => {
++      if (!latest.current.dirty) return;
++      e.preventDefault();
++      e.returnValue = "";
++    };
++    window.addEventListener("beforeunload", warn);
++    return () => {
++      window.removeEventListener("beforeunload", warn);
++      const l = latest.current;
++      if (l.dirty) l.save({ preferences: { custom_instructions: l.text } });
++    };
++  }, []);
++
++  // Standart model: tanlanmagan (null) bo'lsa chat Auto bilan ochiladi — shu yerda ham Auto belgilanadi
++  const value = me.preferences.default_model ?? "auto";
++  const current = models.find((m) => m.id === value);
++  const pick = (id: string) => {
++    const next = id === "auto" ? null : id;
++    if (next !== me.preferences.default_model) save({ preferences: { default_model: next } });
++  };
+ 
+   return (
+     <>
+       <Section title={t("settings.defaultModel")} desc={t("settings.defaultModelHint")}>
+-        <div className="grid gap-2 p-3 sm:grid-cols-2">
+-          {models.map((m) => (
+-            <button
+-              key={m.id}
+-              onClick={() => save({ preferences: { default_model: m.id } })}
+-              className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition ${current === m.id ? "border-violet-500 bg-violet-500/10" : "border-neutral-800 hover:border-neutral-600"}`}
+-            >
+-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colorOf(m.provider) }} />
+-              <span className="flex-1">{m.label}</span>
+-              {m.vision && <span className="text-[10px] uppercase tracking-wide text-neutral-500">vision</span>}
+-            </button>
+-          ))}
++        <div className="p-4">
++          <ModelSelector models={models} value={value} onChange={pick} />
++          {current?.available === false && (
++            <p className="mt-3 flex items-start gap-2 text-xs text-amber-400">
++              <AlertTriangle size={14} className="mt-px shrink-0" />
++              <span>
++                {current.unavailable_reason === "quota" ? t("model.quotaHint") : t("model.noKeyHint")}{" "}
++                <Link href="/settings?tab=keys" className="underline">
++                  {t("settings.tab.keys")}
++                </Link>
++              </span>
++            </p>
++          )}
+         </div>
+       </Section>
+       <Section title={t("settings.responseLanguage")}>
+@@ -65,14 +97,24 @@ export default function AiTab() {
+       </Section>
+       <Section title={t("settings.instructions")} desc={t("settings.instructionsHint")}>
+         <div className="p-4">
+-          <textarea className={`${inputCls} min-h-36 resize-y`} value={text} maxLength={MAX} onChange={(e) => setText(e.target.value)} />
+-          <div className="mt-2 flex items-center justify-between">
++          <textarea
++            className={`${inputCls} min-h-36 resize-y`}
++            value={text}
++            maxLength={MAX}
++            aria-label={t("settings.instructions")}
++            onChange={(e) => setText(e.target.value)}
++            onBlur={saveText}
++          />
++          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+             <span className={`text-xs tabular-nums ${text.length > MAX * 0.9 ? "text-amber-400" : "text-neutral-500"}`}>
+               {text.length} / {MAX}
+             </span>
+-            <button className={btnCls} disabled={text === me.preferences.custom_instructions} onClick={() => save({ preferences: { custom_instructions: text } })}>
+-              {t("common.save")}
+-            </button>
++            <span className="ml-auto flex items-center gap-3">
++              {dirty && <span className="text-xs text-neutral-500">{t("settings.unsaved")}</span>}
++              <button className={btnCls} disabled={!dirty} onClick={saveText}>
++                {t("common.save")}
++              </button>
++            </span>
+           </div>
+         </div>
+       </Section>
+diff --git a/frontend/src/components/settings/ui.tsx b/frontend/src/components/settings/ui.tsx
+index cb36aec..50925d3 100644
+--- a/frontend/src/components/settings/ui.tsx
++++ b/frontend/src/components/settings/ui.tsx
+@@ -1,8 +1,9 @@
+ "use client";
+ 
+-/** Sozlamalar sahifasining umumiy qismlari: bo'lim, qator, kalit (toggle), segment, bildirishnoma. */
+-import { createContext, useCallback, useContext, useState } from "react";
+-import { Check, X } from "lucide-react";
++/** Sozlamalar sahifasining umumiy qismlari: bo'lim, qator, kalit (toggle), segment, o'chirishni tasdiqlash, bildirishnoma. */
++import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState } from "react";
++import { Check, Trash2, X } from "lucide-react";
++import { useI18n } from "@/lib/i18n";
+ 
+ export function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
+   return (
+@@ -14,14 +15,15 @@ export function Section({ title, desc, children }: { title: string; desc?: strin
+   );
+ }
+ 
++/** Nom va boshqaruv elementi bir qatorda; joy yetmasa boshqaruv nom ostiga o'tadi (ustma-ust chiqmaydi). */
+ export function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+   return (
+-    <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+-      <div className="min-w-0">
++    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3.5">
++      <div className="min-w-0 flex-1 basis-52">
+         <div className="text-sm text-neutral-100">{label}</div>
+         {hint && <div className="mt-0.5 text-xs text-neutral-500">{hint}</div>}
+       </div>
+-      <div className="shrink-0">{children}</div>
++      <div className="min-w-0 max-w-full">{children}</div>
+     </div>
+   );
+ }
+@@ -43,16 +45,50 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
+   );
+ }
+ 
++/**
++ * Segmentli tanlov. Fon "tabletkasi" faol tugmaning HAQIQIY o'lchami va joyiga qo'yiladi
++ * (tugmalar kengligi tilga va shrift o'lchamiga qarab har xil bo'ladi).
++ */
+ export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: React.ReactNode }[]; onChange: (v: T) => void }) {
+-  const idx = Math.max(0, options.findIndex((o) => o.id === value));
++  const ref = useRef<HTMLDivElement>(null);
++  const [pill, setPill] = useState<{ left: number; width: number; animate: boolean } | null>(null);
++  useLayoutEffect(() => {
++    const box = ref.current;
++    if (!box) return;
++    const place = () => {
++      const btn = box.querySelector<HTMLElement>('[aria-pressed="true"]');
++      if (!btn) return setPill(null);
++      // Birinchi joylashtirishda animatsiya yo'q (chapdan sirpanib kelmasin)
++      setPill((p) => ({ left: btn.offsetLeft, width: btn.offsetWidth, animate: p !== null }));
++    };
++    place();
++    const ro = new ResizeObserver(place);
++    ro.observe(box);
++    box.querySelectorAll("button").forEach((b) => ro.observe(b));
++    return () => ro.disconnect();
++  }, [value, options.length]);
++
+   return (
+-    <div className="relative flex rounded-lg border border-neutral-800 bg-neutral-950 p-0.5">
+-      <span
+-        className="absolute inset-y-0.5 rounded-md bg-neutral-800 transition-transform duration-300"
+-        style={{ width: `calc((100% - 4px) / ${options.length})`, transform: `translateX(${idx * 100}%)`, transitionTimingFunction: "cubic-bezier(.3,1.3,.5,1)" }}
+-      />
++    <div ref={ref} className="relative flex max-w-full overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-0.5">
++      {pill && (
++        <span
++          aria-hidden
++          className="absolute inset-y-0.5 left-0 rounded-md bg-neutral-800"
++          style={{
++            width: pill.width,
++            transform: `translateX(${pill.left}px)`,
++            transition: pill.animate ? "transform .3s cubic-bezier(.3,1.3,.5,1), width .3s cubic-bezier(.3,1.3,.5,1)" : "none",
++          }}
++        />
++      )}
+       {options.map((o) => (
+-        <button key={o.id} onClick={() => onChange(o.id)} className={`relative z-10 flex-1 whitespace-nowrap px-3 py-1 text-sm transition-colors ${o.id === value ? "text-neutral-50" : "text-neutral-400 hover:text-neutral-200"}`}>
++        <button
++          key={o.id}
++          type="button"
++          aria-pressed={o.id === value}
++          onClick={() => onChange(o.id)}
++          className={`relative z-10 flex-1 whitespace-nowrap rounded-md px-3 py-1 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500/60 ${o.id === value ? "text-neutral-50" : "text-neutral-400 hover:text-neutral-200"}`}
++        >
+           {o.label}
+         </button>
+       ))}
+@@ -65,25 +101,82 @@ export const btnCls = "rounded-md bg-violet-600 px-4 py-2 text-sm text-white tra
+ export const btnGhostCls = "rounded-md border border-neutral-700 px-4 py-2 text-sm transition hover:bg-neutral-800 disabled:opacity-50";
+ export const btnDangerCls = "rounded-md border border-red-500/40 px-4 py-2 text-sm text-red-400 transition hover:bg-red-500/10 disabled:opacity-50";
+ 
++/**
++ * O'chirish tugmasi (axlat qutisi): bosilganda darhol o'chirmaydi — yonida savol va "Bekor qilish / O'chirish" chiqadi.
++ * `onConfirm` tugaguncha tugma bloklanadi (ikki marta bosish ikki so'rov yubormaydi).
++ */
++export function ConfirmDelete({
++  question,
++  onConfirm,
++  disabled,
++  className = "rounded-md p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-red-400 disabled:opacity-50",
++  size = 15,
++}: {
++  question: string;
++  onConfirm: () => Promise<unknown>;
++  disabled?: boolean;
++  className?: string;
++  size?: number;
++}) {
++  const { t } = useI18n();
++  const [ask, setAsk] = useState(false);
++  const [busy, setBusy] = useState(false);
++  if (!ask) {
++    return (
++      <button type="button" onClick={() => setAsk(true)} disabled={disabled} aria-label={t("common.delete")} title={t("common.delete")} className={className}>
++        <Trash2 size={size} />
++      </button>
++    );
++  }
++  return (
++    <span className="pop-in flex flex-wrap items-center justify-end gap-2">
++      <span className="text-xs text-red-400">{question}</span>
++      <button type="button" autoFocus onClick={() => setAsk(false)} className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs hover:bg-neutral-800">
++        {t("common.cancel")}
++      </button>
++      <button
++        type="button"
++        disabled={busy}
++        onClick={async () => {
++          setBusy(true);
++          try {
++            await onConfirm();
++          } finally {
++            setBusy(false);
++            setAsk(false);
++          }
++        }}
++        className="rounded-md bg-red-600 px-2.5 py-1 text-xs text-white hover:bg-red-500 disabled:opacity-50"
++      >
++        {t("common.delete")}
++      </button>
++    </span>
++  );
++}
++
+ type Toast = { id: number; text: string; ok: boolean };
+ const ToastCtx = createContext<(text: string, ok?: boolean) => void>(() => {});
+ export const useToast = () => useContext(ToastCtx);
+ 
+-/** Pastdan chiqib, o'zi yo'qoladigan kichik bildirishnomalar ("Saqlandi"). */
++/** Pastdan chiqib, o'zi yo'qoladigan kichik bildirishnomalar ("Saqlandi"). Xatolar uzoqroq turadi. */
+ export function ToastProvider({ children }: { children: React.ReactNode }) {
+   const [toasts, setToasts] = useState<Toast[]>([]);
+   const show = useCallback((text: string, ok = true) => {
+     const id = Date.now() + Math.random();
+     setToasts((t) => [...t, { id, text, ok }]);
+-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
++    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ok ? 2600 : 6000);
+   }, []);
+   return (
+     <ToastCtx.Provider value={show}>
+       {children}
+-      <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
++      <div
++        role="status"
++        aria-live="polite"
++        className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center gap-2"
++      >
+         {toasts.map((t) => (
+-          <div key={t.id} className="pop-in flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm shadow-xl">
+-            {t.ok ? <Check size={15} className="text-emerald-400" /> : <X size={15} className="text-red-400" />}
++          <div key={t.id} className="pop-in flex items-center gap-2 rounded-2xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm shadow-xl">
++            {t.ok ? <Check size={15} className="shrink-0 text-emerald-400" /> : <X size={15} className="shrink-0 text-red-400" />}
+             {t.text}
+           </div>
+         ))}
 diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
 index 675d354..2178a3c 100644
 --- a/frontend/src/lib/api.ts
