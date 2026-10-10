@@ -117,8 +117,10 @@ function ToolCard({ item }: { item: Extract<AgentItem, { kind: "tool" }> }) {
   const [open, setOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const { t } = useI18n();
-  const Icon = TOOL_ICONS[item.name] ?? Terminal;
-  const label = item.name in TOOL_ICONS ? t(`tool.${item.name}` as TKey) : item.name;
+  // Object.hasOwn: model "constructor"/"toString" kabi nom yuborsa, Object.prototype funksiyasi ikonka bo'lib qolmasin
+  const known = Object.hasOwn(TOOL_ICONS, item.name);
+  const Icon = known ? TOOL_ICONS[item.name] : Terminal;
+  const label = known ? t(`tool.${item.name}` as TKey) : item.name;
   const filePath = String(item.args.path ?? "");
   const desktop = getDesktop();
   const canOpen =
@@ -300,7 +302,8 @@ export default function AgentPage() {
           <ModelSelector
             models={models}
             value={model}
-            disabled={!!agent.session}
+            // Birinchi qadam ketayotganda ham o'zgartirib bo'lmaydi; tushuntirish faqat sessiya qulflanganda
+            disabled={agent.running || !!agent.session}
             title={agent.session ? t("agent.modelLocked") : undefined}
             onChange={(id) => {
               setModel(id);

@@ -78,5 +78,11 @@ test("run_command loyiha papkasida ishlaydi", async () => {
 });
 
 test("noma'lum asbob", async () => {
-  assert.equal((await runTool(project(), "rm_rf", {})).isError, true);
+  const root = project();
+  // Object.prototype dagi nomlar ham noma'lum (avval "constructor" papka yo'lini qaytarardi)
+  for (const name of ["rm_rf", "constructor", "toString", "hasOwnProperty", "__proto__", ["read_file"]]) {
+    const r = await runTool(root, name, { path: "README.md" });
+    assert.equal(r.isError, true, String(name));
+    assert.match(r.output, /Noma'lum asbob/, String(name));
+  }
 });

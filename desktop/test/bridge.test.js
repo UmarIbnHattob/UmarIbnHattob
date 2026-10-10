@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
-const { newState, cancelJobs, resetOnNavigation, callTool, saveImage } = require("../src/bridge");
+const { newState, cancelJobs, resetFolder, resetOnNavigation, callTool, saveImage } = require("../src/bridge");
 const { runTool, checkArgs } = require("../src/fsTools");
 const { describe } = require("../src/approval");
 const { DICTS, normLang } = require("../src/i18n");
@@ -138,8 +138,9 @@ test("ruxsat oynasi ochiq turganda sahifa qayta yuklansa, amal bajarilmaydi va r
   assert.equal(s.autoApprove.size, 0);
 });
 
-test("To'xtatish va sahifa qayta yuklanishi ishlayotgan buyruqni o'ldiradi", { skip: process.platform === "win32" }, async () => {
-  for (const stop of ["cancel", "did-navigate"]) {
+test("To'xtatish, sahifa qayta yuklanishi va oyna yopilishi ishlayotgan buyruqni o'ldiradi", { skip: process.platform === "win32" }, async () => {
+  // resetFolder — main.js da oyna "closed" va ilova "will-quit" hodisalarida chaqiriladi
+  for (const stop of ["cancel", "did-navigate", "resetFolder"]) {
     const root = project();
     const wc = new EventEmitter();
     const s = newState();
@@ -151,6 +152,7 @@ test("To'xtatish va sahifa qayta yuklanishi ishlayotgan buyruqni o'ldiradi", { s
     await new Promise((ok) => setTimeout(ok, 300));
     assert.equal(s.jobs.size, 1);
     if (stop === "cancel") cancelJobs(s);
+    else if (stop === "resetFolder") resetFolder(s);
     else wc.emit("did-navigate");
     const r = await pending;
     assert.ok(Date.now() - t0 < 3000, `${stop}: buyruq darhol to'xtashi kerak`);
@@ -177,6 +179,109 @@ test("saveImage: kengaytma va yo'l ruxsatdan oldin tekshiriladi", async () => {
   assert.ok(fs.existsSync(path.join(root, "assets", "logo.png")));
 });
 
+test("saveImage: mavjud faylni qayta yozish uchun 'qayta so'rama' bo'lsa ham ruxsat so'raladi", async () => {
+  const root = project();
+  fs.mkdirSync(path.join(root, "assets"));
+  fs.writeFileSync(path.join(root, "assets", "logo.png"), "MENING LOGOTIPIM");
+  const s = newState();
+  s.root = root;
+  s.autoApprove.add("save_image");
+
+  // Yangi fayl — so'ralmaydi
+  const fresh = fakeAsk();
+  assert.equal((await saveImage(s, "assets/new.png", PNG, fresh.ask)).isError, false);
+  assert.equal(fresh.calls.length, 0);
+
+  // Mavjud fayl — rad etilsa, fayl o'zgarmaydi; "qayta so'rama" belgisi yo'q
+  const no = fakeAsk({ approved: false, remember: true });
+  const denied = await saveImage(s, "assets/logo.png", PNG, no.ask);
+  assert.equal(denied.isError, true);
+  assert.equal(no.calls.length, 1);
+  assert.equal(no.calls[0].overwrite, true);
+  assert.match(no.calls[0].title, /Mavjud rasmni qayta yozish: assets\/logo\.png/);
+  assert.match(no.calls[0].detail, /eski mazmun almashtiriladi/);
+  assert.equal(fs.readFileSync(path.join(root, "assets", "logo.png"), "utf8"), "MENING LOGOTIPIM");
+
+  // Ruxsat berilsa yoziladi, lekin keyingi qayta yozish yana so'raladi
+  const yes = fakeAsk({ approved: true, remember: true });
+  assert.equal((await saveImage(s, "assets/logo.png", PNG, yes.ask)).isError, false);
+  assert.equal(fs.readFileSync(path.join(root, "assets", "logo.png")).toString("base64"), PNG);
+  const again = fakeAsk();
+  await saveImage(s, "assets/logo.png", PNG, again.ask);
+  assert.equal(again.calls.length, 1);
+});
+
+test("saveImage unique: ilova o'zgartirgan nom band bo'lsa bo'sh nom tanlanadi (logo-1.png)", async () => {
+  const root = project();
+  fs.mkdirSync(path.join(root, "assets"));
+  fs.writeFileSync(path.join(root, "assets", "logo.png"), "MENING LOGOTIPIM");
+  const s = newState();
+  s.root = root;
+  s.autoApprove.add("save_image");
+  const { ask, calls } = fakeAsk();
+  const r1 = await saveImage(s, "assets/logo.png", PNG, ask, { unique: true });
+  assert.equal(r1.isError, false);
+  assert.equal(r1.path, "assets/logo-1.png");
+  assert.match(r1.output, /Rasm saqlandi: assets\/logo-1\.png/);
+  const r2 = await saveImage(s, "assets/logo.png", PNG, ask, { unique: true });
+  assert.equal(r2.path, "assets/logo-2.png");
+  assert.equal(calls.length, 0, "yangi fayllar — ruxsat eslab qolingan");
+  assert.equal(fs.readFileSync(path.join(root, "assets", "logo.png"), "utf8"), "MENING LOGOTIPIM");
+  assert.ok(fs.existsSync(path.join(root, "assets", "logo-1.png")));
+  assert.ok(fs.existsSync(path.join(root, "assets", "logo-2.png")));
+  // Nom bo'sh bo'lsa o'zgarmaydi
+  assert.equal((await saveImage(s, "assets/icon.png", PNG, ask, { unique: true })).path, "assets/icon.png");
+});
+
+test("nishoni yo'q symlink orqali papkadan tashqarida fayl yaratilmaydi", { skip: process.platform === "win32" }, async () => {
+  const root = project();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "omni-out-"));
+  fs.symlinkSync(path.join(outside, "created.txt"), path.join(root, "dangling.txt"));
+  fs.symlinkSync(path.join(outside, "created.png"), path.join(root, "dangling.png"));
+  const s = newState();
+  s.root = root;
+  const { ask, calls } = fakeAsk();
+  const w = await callTool(s, "write_file", { path: "dangling.txt", content: "x" }, ask);
+  assert.equal(w.isError, true);
+  assert.match(w.output, /nishoni mavjud bo'lmagan symlink/);
+  const img = await saveImage(s, "dangling.png", PNG, ask);
+  assert.equal(img.isError, true);
+  // Oraliq papka o'rnidagi nishonsiz symlink: xabar aynan shu symlinkni ko'rsatadi
+  fs.symlinkSync(path.join(outside, "newdir"), path.join(root, "dlink"));
+  const deep = await callTool(s, "write_file", { path: "dlink/sub/x.txt", content: "x" }, ask);
+  assert.equal(deep.isError, true);
+  assert.match(deep.output, /^dlink — nishoni mavjud bo'lmagan symlink/);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(fs.readdirSync(outside), []);
+  // Fayl ichidan yo'l — avvalgidek "Topilmadi" (ENOTDIR xom xatosi emas)
+  assert.equal((await callTool(s, "read_file", { path: "README.md/x.txt" }, ask)).output, "Topilmadi: README.md/x.txt");
+  // Loyiha ichidagi oddiy symlink avvalgidek ishlaydi
+  fs.symlinkSync(path.join(root, "README.md"), path.join(root, "readme-link.md"));
+  assert.equal((await callTool(s, "read_file", { path: "readme-link.md" }, ask)).output, "# Loyiha\n");
+});
+
+test("Object.prototype nomlari va matn bo'lmagan nomlar asbob emas (ruxsatsiz bajarilmaydi)", async () => {
+  const root = project();
+  const s = newState();
+  s.root = root;
+  const { ask, calls } = fakeAsk();
+  for (const name of ["constructor", "toString", "hasOwnProperty", "valueOf", "__proto__", "isPrototypeOf"]) {
+    assert.throws(() => checkArgs(root, name, {}), /Noma'lum asbob/, name);
+    const r = await callTool(s, name, {}, ask);
+    assert.deepEqual(r, { output: `Noma'lum asbob: ${name}`, isError: true }, name);
+  }
+  // ["run_command"] matnga aylanib asbobni topardi, lekin ruxsat ro'yxatida yo'q — oynasiz bajarilardi
+  for (const name of [["run_command"], ["write_file"], { toString: null }, 5, null]) {
+    const r = await callTool(s, name, { command: "echo x > ran.txt", path: "README.md", content: "buzildi" }, ask);
+    assert.equal(r.isError, true, JSON.stringify(name));
+    assert.match(r.output, /Noma'lum asbob/);
+  }
+  assert.equal(calls.length, 0);
+  await new Promise((ok) => setTimeout(ok, 200));
+  assert.equal(fs.existsSync(path.join(root, "ran.txt")), false);
+  assert.equal(fs.readFileSync(path.join(root, "README.md"), "utf8"), "# Loyiha\n");
+});
+
 test("matnlar interfeys tilida (en/ru), noma'lum til -> o'zbekcha", async () => {
   const root = project();
   const s = newState();
@@ -195,6 +300,7 @@ test("matnlar interfeys tilida (en/ru), noma'lum til -> o'zbekcha", async () => 
 
   assert.equal(normLang("en-US"), "en");
   assert.equal(normLang("de"), "uz");
+  for (const bad of ["constructor", "toString", "__proto__"]) assert.equal(normLang(bad), "uz", bad);
   assert.equal(normLang(undefined), "uz");
 });
 

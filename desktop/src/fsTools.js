@@ -41,13 +41,29 @@ function resolveInside(root, rel, { mustExist = false } = {}) {
   const inside = (p) => p === realRoot || p.startsWith(realRoot + path.sep);
   if (!inside(target)) throw new ToolError("fs.outside");
 
-  // Mavjud eng yaqin ota-papkaning haqiqiy yo'lini tekshiramiz (symlink tashqariga olib chiqmasin)
+  // Mavjud eng yaqin ota-papkaning haqiqiy yo'lini tekshiramiz (symlink tashqariga olib chiqmasin).
+  // lstat (existsSync emas): nishoni yo'q (osilib qolgan) symlink ham "mavjud" — aks holda yozish uni kuzatib,
+  // papkadan tashqarida fayl yaratadi.
+  const exists = (p) => {
+    try {
+      fs.lstatSync(p);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   let probe = target;
-  while (!fs.existsSync(probe)) {
+  while (!exists(probe)) {
     if (mustExist) throw new ToolError("fs.notFound", { path: rel });
     probe = path.dirname(probe);
   }
-  if (!inside(fs.realpathSync(probe))) throw new ToolError("fs.symlinkOutside");
+  let real;
+  try {
+    real = fs.realpathSync(probe);
+  } catch {
+    throw new ToolError("fs.danglingSymlink", { path: path.relative(realRoot, probe) });
+  }
+  if (!inside(real)) throw new ToolError("fs.symlinkOutside");
   return target;
 }
 
@@ -202,7 +218,11 @@ const ARGS = {
  * papkadan tashqari yo'l uchun foydalanuvchi bezovta qilinmaydi. Xato bo'lsa ToolError tashlaydi.
  */
 function checkArgs(root, name, args) {
-  if (!TOOLS[name]) throw new ToolError("fs.unknownTool", { name });
+  // Object.hasOwn: "constructor", "toString" kabi Object.prototype nomlari asbob deb qabul qilinmasin.
+  // Nom faqat matn: ["run_command"] kabi massiv kalit sifatida matnga aylanib asbobni topardi, lekin
+  // NEEDS_APPROVAL.has() uni tanimay ruxsat oynasi chiqmasdi.
+  if (typeof name !== "string") throw new ToolError("fs.unknownTool", { name: typeof name });
+  if (!Object.hasOwn(TOOLS, name)) throw new ToolError("fs.unknownTool", { name });
   // Server JSON bo'lmagan argumentlarni {"__invalid_json__": "..."} ko'rinishida yuboradi
   if (!args || typeof args !== "object" || Array.isArray(args) || "__invalid_json__" in args) throw new ToolError("fs.invalidArgs");
   for (const [arg, kind] of Object.entries(ARGS[name])) {
