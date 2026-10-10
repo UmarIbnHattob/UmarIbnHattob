@@ -127,9 +127,152 @@ def test_voice_whisper_fallback(client, fake_net, monkeypatch):
     client.post("/api/providers", json={"kind": "groq", "api_key": "gsk-1234"})
     seen = {}
 
-    async def fake_tr(base, key, model, data):
-        seen.update(base=base, model=model, size=len(data))
+    async def fake_tr(base, key, model, data, filename="voice.wav", mime="audio/wav"):
+        seen.update(base=base, model=model, size=len(data), filename=filename)
         return "salom dunyo"
     monkeypatch.setattr(openai_compat, "transcribe", fake_tr)
     r = client.post("/api/voice/transcribe", json={"audio": wav})
     assert r.json() == {"text": "salom dunyo"} and seen["model"] == "whisper-large-v3-turbo" and "groq" in seen["base"]
+
+
+def test_ssrf_blocks_non_global_ranges(client, monkeypatch):
+    monkeypatch.setattr(settings, "allow_local_providers", False)
+    for url in ["http://100.64.0.1/v1", "http://100.100.100.200/latest", "http://198.18.0.1", "http://[::ffff:10.0.0.1]",
+                "http://[fd00::1]/v1", "http://192.0.0.170"]:
+        r = client.post("/api/providers", json={"kind": "custom", "base_url": url})
+        assert r.status_code == 400 and "ichki" in r.json()["detail"], url
+
+
+def test_custom_url_rechecked_at_request_time(client, fake_net, monkeypatch):
+    """DNS rebinding: qo'shilganda tashqi manzil, keyin ichki manzilga o'zgarsa so'rov yuborilmaydi."""
+    import socket
+    monkeypatch.setattr(settings, "allow_local_providers", False)
+    ip = {"v": "93.184.216.34"}
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, *a, **k: [(2, 1, 6, "", (ip["v"], port))])
+    p = client.post("/api/providers", json={"kind": "custom", "base_url": "https://custom.example.com/v1"}).json()
+    ref = f"cp:{p['id']}:qwen/qwen-2.5-coder-32b"
+    url = f"/api/conversations/{client.post('/api/conversations').json()['id']}/messages"
+    assert events(client.post(url, json={"content": "salom", "model": ref}))[-1]["type"] == "done"
+    ip["v"] = "169.254.169.254"
+    r = client.post(url, json={"content": "salom", "model": ref})
+    assert r.status_code == 400 and "ichki" in r.json()["detail"]
+    assert len(fake_net) == 1  # ikkinchi so'rov ichki manzilga yuborilmadi
+
+
+@pytest.mark.anyio
+async def test_non_chat_models_filtered_for_every_provider(monkeypatch):
+    lists = {
+        "https://api.groq.com/openai/v1": [
+            {"id": "llama-3.3-70b-versatile"}, {"id": "whisper-large-v3-turbo"}, {"id": "whisper-large-v3"},
+            {"id": "distil-whisper-large-v3-en"}, {"id": "playai-tts"}, {"id": "playai-tts-arabic"},
+            {"id": "meta-llama/llama-guard-4-12b"}, {"id": "meta-llama/llama-prompt-guard-2-86m"}, {"id": "qwen-qwq-32b"},
+        ],
+        "https://api.mistral.ai/v1": [
+            {"id": "mistral-large-latest", "capabilities": {"completion_chat": True, "function_calling": True, "vision": True}},
+            {"id": "mistral-embed", "capabilities": {"completion_chat": False}},
+            {"id": "mistral-moderation-latest"}, {"id": "mistral-ocr-latest"},
+            {"id": "codestral-latest", "type": "base", "capabilities": {"completion_chat": True, "function_calling": False}},
+        ],
+        "https://api.together.xyz/v1": [
+            {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "type": "chat"},
+            {"id": "black-forest-labs/FLUX.1-schnell", "type": "image"},
+            {"id": "BAAI/bge-large-en-v1.5", "type": "embedding"}, {"id": "Salesforce/Llama-Rank-V1", "type": "rerank"},
+        ],
+        "http://localhost:11434/v1": [{"id": "llama3.2:latest"}, {"id": "nomic-embed-text:latest"}],
+        "https://openrouter.ai/api/v1": [
+            {"id": "google/gemini-2.5-flash-image", "architecture": {"output_modalities": ["image", "text"]}},
+            {"id": "x/image-only", "architecture": {"output_modalities": ["image"]}},
+        ],
+    }
+
+    async def fake_get(self, url, **kw):
+        base = url.rsplit("/models", 1)[0]
+        return httpx.Response(200, json={"data": lists[base]}, request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    got = {b: await openai_compat.list_models(b, "k") for b in lists}
+    assert [m["id"] for m in got["https://api.groq.com/openai/v1"]] == ["llama-3.3-70b-versatile", "qwen-qwq-32b"]
+    mistral = {m["id"]: m for m in got["https://api.mistral.ai/v1"]}
+    assert list(mistral) == ["mistral-large-latest", "codestral-latest"]
+    assert mistral["mistral-large-latest"]["vision"] and not mistral["codestral-latest"]["tools"]
+    assert [m["id"] for m in got["https://api.together.xyz/v1"]] == ["meta-llama/Llama-3.3-70B-Instruct-Turbo"]
+    assert [m["id"] for m in got["http://localhost:11434/v1"]] == ["llama3.2:latest"]
+    assert [m["id"] for m in got["https://openrouter.ai/api/v1"]] == ["google/gemini-2.5-flash-image"]
+
+
+def test_duplicate_provider_and_blank_name(client, fake_net, monkeypatch):
+    monkeypatch.setattr(settings, "allow_local_providers", True)
+    p = client.post("/api/providers", json={"kind": "openrouter", "api_key": "sk-or-1234", "name": "   "})
+    assert p.status_code == 201 and p.json()["name"] == "OpenRouter"
+    r = client.post("/api/providers", json={"kind": "openrouter", "api_key": "sk-or-other", "base_url": "https://OpenRouter.ai/api/v1/"})
+    assert r.status_code == 409 and "allaqachon" in r.json()["detail"]
+    # Boshqa foydalanuvchi o'zinikini qo'sha oladi
+    from tests.conftest import make_client
+    assert make_client("v@example.com").post("/api/providers", json={"kind": "openrouter", "api_key": "sk-or-1234"}).status_code == 201
+
+
+@pytest.mark.anyio
+async def test_provider_limit_is_race_safe(client, monkeypatch):
+    """Bitta event loop'da (haqiqiy server kabi) parallel qo'shish: limit oshmaydi va qulf tufayli osilib qolmaydi."""
+    import asyncio
+    from app.main import app
+    from app.routers import providers as providers_router
+    monkeypatch.setattr(settings, "allow_local_providers", True)
+    monkeypatch.setattr(providers_router, "MAX_PROVIDERS", 3)
+
+    async def slow_get(self, url, **kw):
+        await asyncio.sleep(0.3)  # tarmoq so'rovi: shu orada boshqalar ham birinchi tekshiruvdan o'tadi
+        return httpx.Response(200, json=MODELS_JSON, request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx.AsyncClient, "get", slow_get)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", cookies=dict(client.cookies)) as ac:
+        reqs = [ac.post("/api/providers", json={"kind": "custom", "base_url": f"https://custom.example.com/v{i}"}) for i in range(16)]
+        codes = [r.status_code for r in await asyncio.wait_for(asyncio.gather(*reqs), 20)]
+    assert codes.count(201) == 3 and set(codes) == {201, 400}
+    assert len(client.get("/api/providers").json()) == 3
+
+
+def test_patch_provider_key_and_name(client, monkeypatch):
+    monkeypatch.setattr(settings, "allow_local_providers", True)
+    keys = []
+
+    async def fake_get(self, url, **kw):
+        auth = kw["headers"].get("Authorization", "")
+        keys.append(auth)
+        if "bad" in auth:
+            return httpx.Response(401, json={"error": "x"}, request=httpx.Request("GET", url))
+        return httpx.Response(200, json=MODELS_JSON, request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    pid = client.post("/api/providers", json={"kind": "openrouter", "api_key": "sk-or-old-1234"}).json()["id"]
+    r = client.patch(f"/api/providers/{pid}", json={"api_key": "sk-or-bad-1234"})
+    assert r.status_code == 400  # yangi kalit tekshiruvdan o'tmadi: eski kalit saqlanib qoladi
+    r = client.patch(f"/api/providers/{pid}", json={"api_key": "sk-or-new-1234", "name": "Mening OR"})
+    assert r.status_code == 200 and r.json()["id"] == pid and r.json()["name"] == "Mening OR"
+    assert keys[-1] == "Bearer sk-or-new-1234"
+    assert client.patch(f"/api/providers/{pid}", json={"name": "  "}).json()["name"] == "OpenRouter"
+    assert client.patch(f"/api/providers/{pid}", json={"api_key": ""}).status_code == 400  # OpenRouter'ga kalit shart
+    client.post("/api/providers/" + pid + "/refresh")
+    assert keys[-1] == "Bearer sk-or-new-1234"
+    from tests.conftest import make_client
+    assert make_client("v@example.com").patch(f"/api/providers/{pid}", json={"name": "x"}).status_code == 404
+
+
+def test_delete_provider_clears_default_model(client, fake_net, monkeypatch):
+    monkeypatch.setattr(settings, "allow_local_providers", True)
+    pid = client.post("/api/providers", json={"kind": "openrouter", "api_key": "sk-or-1234"}).json()["id"]
+    ref = f"cp:{pid}:qwen/qwen-2.5-coder-32b"
+    assert client.patch("/api/me", json={"preferences": {"default_model": ref}}).status_code == 200
+    client.delete(f"/api/providers/{pid}")
+    assert client.get("/api/me").json()["preferences"]["default_model"] is None
+
+
+def test_old_stored_non_chat_models_hidden_from_catalog(client, fake_net, monkeypatch):
+    from sqlalchemy import text
+    from app.database import engine
+    monkeypatch.setattr(settings, "allow_local_providers", True)
+    pid = client.post("/api/providers", json={"kind": "groq", "api_key": "gsk-1234"}).json()["id"]
+    with engine.begin() as c:  # filtr qo'shilishidan oldin saqlangan ro'yxat
+        c.execute(text("""UPDATE custom_providers SET models = '[{"id": "llama-3.3-70b-versatile"}, {"id": "whisper-large-v3-turbo"}]' WHERE id = :i"""), {"i": pid})
+    ids = [m["id"] for m in client.get("/api/models").json() if m["source"] == "custom"]
+    assert ids == [f"cp:{pid}:llama-3.3-70b-versatile"]
+    assert not [m for m in client.get("/api/agent/models").json() if "whisper" in m["id"]]
+

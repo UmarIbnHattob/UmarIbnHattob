@@ -1,7 +1,8 @@
 """Media Studio: rasm yaratish, ro'yxat, ko'rish/yuklab olish, o'chirish."""
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ from app.deps import get_current_user
 from app.models import MediaItem, Provider, User
 from app.providers import gemini_image
 from app.providers.base import ProviderError
-from app.quota import resolve_key_info
+from app.quota import refund_on_error, resolve_key_info
 from app.usage_log import record
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -47,11 +48,18 @@ def image_models():
 
 
 @router.get("", response_model=list[MediaOut])
-def list_media(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def list_media(
+    limit: int = Query(60, ge=1, le=200),
+    before: datetime | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Eng yangisidan boshlab. Keyingi sahifa: ?before=<oxirgi elementning created_at>."""
     # `data` ustunini yuklamaymiz: ro'yxat tez bo'lishi uchun
-    rows = db.scalars(
-        select(MediaItem).where(MediaItem.user_id == user.id).order_by(MediaItem.created_at.desc()).limit(60)
-    )
+    stmt = select(MediaItem).where(MediaItem.user_id == user.id)
+    if before is not None:
+        stmt = stmt.where(MediaItem.created_at < before)
+    rows = db.scalars(stmt.order_by(MediaItem.created_at.desc(), MediaItem.id.desc()).limit(limit))
     return [_out(m) for m in rows]
 
 
@@ -60,15 +68,17 @@ async def create_image(body: ImageIn, db: Session = Depends(get_db), user: User 
     if body.model not in {m["id"] for m in gemini_image.IMAGE_MODELS}:
         raise HTTPException(400, f"Noma'lum model: {body.model}")
     api_key, platform = resolve_key_info(db, user, Provider.gemini)
-    record(user.id, "image", "gemini", body.model, platform)
 
     # Rasm yaratish 1-2 daqiqa olishi mumkin: shu vaqtda baza ulanishini band qilib turmaymiz
     user_id = user.id
     db.close()
-    try:
-        mime, data = await gemini_image.generate_image(api_key, body.model, body.prompt)
-    except ProviderError as exc:
-        raise HTTPException(502, str(exc))
+    # Rasm chiqmasa (xato, rad etildi) bepul limit qaytariladi va statistikaga yozilmaydi
+    with refund_on_error(user_id, platform):
+        try:
+            mime, data = await gemini_image.generate_image(api_key, body.model, body.prompt)
+        except ProviderError as exc:
+            raise HTTPException(502, str(exc))
+    record(user_id, "image", "gemini", body.model, platform)
 
     item = MediaItem(user_id=user_id, prompt=body.prompt, model=body.model, mime_type=mime, data=data)
     db.add(item)
@@ -78,9 +88,20 @@ async def create_image(body: ImageIn, db: Session = Depends(get_db), user: User 
 
 
 @router.get("/{media_id}/file")
-def get_file(media_id: uuid.UUID, download: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    item = _own(db, user, media_id)
-    headers = {"Cache-Control": "private, max-age=86400"}
+def get_file(
+    media_id: uuid.UUID,
+    download: bool = False,
+    if_none_match: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = _own(db, user, media_id)  # avval kirish va egalik tekshiriladi, keyin kesh
+    # Brauzer rasmni saqlashi mumkin, lekin har safar serverdan so'raydi: chiqqandan keyin (cookie yo'q) 401 bo'ladi.
+    # Rasm o'zgarmaydi, shuning uchun ETag = id; mos kelsa baytlar qayta yuborilmaydi (304).
+    etag = f'"{item.id}"'
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag}
+    if if_none_match and etag in {t.strip().removeprefix("W/") for t in if_none_match.split(",")}:
+        return Response(status_code=304, headers=headers)
     if download:
         ext = item.mime_type.split("/")[-1]
         headers["Content-Disposition"] = f'attachment; filename="omniai-{item.id}.{ext}"'

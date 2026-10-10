@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -44,18 +45,25 @@ def register(body: Credentials, response: Response, db: Session = Depends(get_db
     if not settings.allow_registration:
         raise HTTPException(403, "Ro'yxatdan o'tish yopilgan.")
     email = body.email.lower()
+    taken = "Bu email allaqachon ro'yxatdan o'tgan."
     if db.scalar(select(User).where(User.email == email)):
-        raise HTTPException(409, "Bu email allaqachon ro'yxatdan o'tgan.")
+        raise HTTPException(409, taken)
 
-    # Eski (loginsiz) ma'lumotlar yo'qolmasin: birinchi ro'yxatdan o'tgan odam ularni oladi
-    legacy = db.scalar(select(User).where(User.email == LEGACY_EMAIL))
+    password_hash = hash_password(body.password)
+    # Eski (loginsiz) ma'lumotlar yo'qolmasin: birinchi ro'yxatdan o'tgan odam ularni oladi.
+    # Qator qulflanadi: bir vaqtda ikki kishi ro'yxatdan o'tsa, faqat bittasi oladi.
+    legacy = db.scalar(select(User).where(User.email == LEGACY_EMAIL).with_for_update())
     if legacy is not None and legacy.password_hash is None:
-        legacy.email, legacy.password_hash = email, hash_password(body.password)
+        legacy.email, legacy.password_hash = email, password_hash
         user = legacy
     else:
-        user = User(email=email, password_hash=hash_password(body.password))
+        user = User(email=email, password_hash=password_hash)
         db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:  # shu email bilan parallel ro'yxatdan o'tish (UNIQUE email)
+        db.rollback()
+        raise HTTPException(409, taken)
     db.refresh(user)
     _set_cookie(response, user)
     return UserOut(id=str(user.id), email=user.email)

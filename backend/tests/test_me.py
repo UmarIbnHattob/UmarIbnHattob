@@ -74,3 +74,17 @@ def test_delete_account(client):
     assert client.request("DELETE", "/api/me", json={"password": "xato"}).status_code == 400
     assert client.request("DELETE", "/api/me", json={"password": "parol12345"}).status_code == 204
     assert TestClient(app).post("/api/auth/login", json={"email": "ali@example.com", "password": "parol12345"}).status_code == 401
+
+
+def test_default_model_validation(client):
+    for bad in ["m" * 1_000_000, "x" * 301, "bad model id", "cp:not-a-uuid:x", "yoq-model"]:
+        r = client.patch("/api/me", json={"preferences": {"default_model": bad}})
+        assert r.status_code == 422, bad[:20]
+    for ok in ["auto", "gemini-2.5-flash", None]:
+        r = client.patch("/api/me", json={"preferences": {"default_model": ok}})
+        assert r.status_code == 200 and r.json()["preferences"]["default_model"] == ok
+
+
+def test_new_password_must_differ(client):
+    r = client.post("/api/me/password", json={"current_password": "parol12345", "new_password": "parol12345"})
+    assert r.status_code == 400 and "farq" in r.json()["detail"]

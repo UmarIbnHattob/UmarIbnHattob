@@ -52,3 +52,32 @@ def test_quota_is_atomic_under_concurrency(client, monkeypatch):
     with ThreadPoolExecutor(10) as ex:
         ok = list(ex.map(one, range(20)))
     assert sum(ok) == 5
+
+
+def test_concurrent_key_save_is_upsert(client):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    cookie = client.cookies.get("omniai_session")
+
+    def put(i):
+        c = TestClient(app)
+        c.cookies.set("omniai_session", cookie)
+        return c.put("/api/keys/deepseek", json={"key": f"sk-deepseek-key-{i:04d}"}).status_code
+
+    with ThreadPoolExecutor(6) as ex:
+        assert list(ex.map(put, range(6))) == [200] * 6
+    keys = [k for k in client.get("/api/keys").json() if k["configured"]]
+    assert len(keys) == 1 and keys[0]["provider"] == "deepseek"
+    r = client.put("/api/keys/deepseek", json={"key": "sk-deepseek-new-9999"})
+    assert r.json()["last4"] == "9999"
+
+
+def test_platform_flags_when_quota_exhausted(client, fake_llm, monkeypatch):
+    monkeypatch.setattr(settings, "platform_deepseek_key", "platform-secret")
+    monkeypatch.setattr(settings, "free_monthly_requests", 1)
+    url = f"/api/conversations/{client.post('/api/conversations').json()['id']}/messages"
+    assert client.post(url, json={"content": "x", "model": "deepseek-chat"}).status_code == 200
+    ds = next(k for k in client.get("/api/keys").json() if k["provider"] == "deepseek")
+    assert ds["platform_available"] is False and ds["platform_exhausted"] is True
+    gm = next(k for k in client.get("/api/keys").json() if k["provider"] == "gemini")
+    assert gm["platform_available"] is False and gm["platform_exhausted"] is False  # platforma kaliti umuman yo'q
