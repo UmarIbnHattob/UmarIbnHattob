@@ -4,18 +4,19 @@
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, net, shell, session } = require("electron");
 const path = require("node:path");
-const { runTool, resolveInside, NEEDS_APPROVAL } = require("./fsTools");
-const { describe } = require("./approval");
+const { resolveInside, errorText } = require("./fsTools");
+const { newState, cancelJobs, resetOnNavigation, callTool, saveImage } = require("./bridge");
+const { tr, normLang } = require("./i18n");
 
 // Qaysi serverga ulanish: OMNIAI_URL muhit o'zgaruvchisi > package.json dagi standart
 const APP_URL = process.env.OMNIAI_URL || require("../package.json").omniai.appUrl;
 const APP_ORIGIN = new URL(APP_URL).origin;
 
 /**
- * Har bir oyna uchun holat: tanlangan papka va "bu sessiyada qayta so'rama" ruxsatlari.
+ * Har bir oyna uchun holat: tanlangan papka, "bu sessiyada qayta so'rama" ruxsatlari va interfeys tili.
  * Papkani FAQAT mahalliy dialog orqali tanlash mumkin — sahifa o'zi yo'l bera olmaydi.
  */
-const state = new Map(); // webContents.id -> { root, autoApprove: Set<string> }
+const state = new Map(); // webContents.id -> { root, autoApprove: Set<string>, lang }
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -36,7 +37,10 @@ function createWindow() {
   // id ni oldindan olamiz: "closed" hodisasida oyna allaqachon yo'q qilingan bo'ladi
   // (win.webContents ga murojaat "Object has been destroyed" xatosini beradi)
   const wcId = win.webContents.id;
-  state.set(wcId, { root: null, autoApprove: new Set() });
+  const s = newState();
+  state.set(wcId, s);
+  // Sahifa qayta yuklansa yoki renderer qulasa: papka va "qayta so'rama" ruxsatlari bekor qilinadi
+  resetOnNavigation(win.webContents, s);
   win.on("closed", () => {
     state.delete(wcId);
     stopRetry(win);
@@ -103,45 +107,60 @@ function trusted(event) {
   }
 }
 
+// Interfeys tili (preload.js sahifadagi <html lang> ni yuboradi): mahalliy oynalar, menyu va asbob natijalari shu tilda
+ipcMain.on("omni:lang", (event, lang) => {
+  if (!trusted(event)) return;
+  const s = state.get(event.sender.id);
+  if (!s || s.lang === normLang(lang)) return;
+  s.lang = normLang(lang);
+  Menu.setApplicationMenu(buildMenu(s.lang));
+});
+
+/** Ruxsat oynasi (bridge.callTool / saveImage uchun): { approved, remember } qaytaradi. */
+function askApproval(event, s, kind, { title, detail, root, image }) {
+  const T = (key, vars) => tr(s.lang, key, vars);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return dialog
+    .showMessageBox(win, {
+      type: kind === "run_command" ? "warning" : "question",
+      title: T("dialog.title"),
+      message: title,
+      detail: `${T("dialog.folder", { root })}\n\n${detail}`,
+      noLink: true,
+      buttons: [T("dialog.allow"), T("dialog.deny")],
+      defaultId: image ? 0 : 1,
+      cancelId: 1,
+      checkboxLabel: T(image ? "dialog.dontAskImages" : "dialog.dontAsk"),
+    })
+    .then((res) => ({ approved: res.response === 0, remember: res.checkboxChecked }));
+}
+
 ipcMain.handle("omni:pickFolder", async (event) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
+  const s = state.get(event.sender.id);
   const win = BrowserWindow.fromWebContents(event.sender);
   const res = await dialog.showOpenDialog(win, {
-    title: "AI ishlaydigan papkani tanlang",
+    title: tr(s.lang, "dialog.pickFolder"),
     properties: ["openDirectory", "createDirectory"],
   });
   if (res.canceled || !res.filePaths[0]) return null;
-  const s = state.get(event.sender.id);
   s.root = res.filePaths[0];
   s.autoApprove.clear(); // yangi papka — ruxsatlar qaytadan so'raladi
   return { name: path.basename(s.root), path: s.root };
 });
 
+// Yozish va buyruqlar uchun ruxsat MAHALLIY oynada so'raladi — veb-sahifa buni chetlab o'ta olmaydi
 ipcMain.handle("omni:tool", async (event, name, args) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
   const s = state.get(event.sender.id);
-  if (!s?.root) return { output: "Avval papka tanlang.", isError: true };
-  args = args && typeof args === "object" ? args : {};
+  return callTool(s, name, args, (req) => askApproval(event, s, name, req));
+});
 
-  // Yozish va buyruqlar uchun ruxsat MAHALLIY oynada so'raladi — veb-sahifa buni chetlab o'ta olmaydi
-  if (NEEDS_APPROVAL.has(name) && !s.autoApprove.has(name)) {
-    const { title, detail } = describe(s.root, name, args);
-    const win = BrowserWindow.fromWebContents(event.sender);
-    const res = await dialog.showMessageBox(win, {
-      type: name === "run_command" ? "warning" : "question",
-      title: "AI ruxsat so'rayapti",
-      message: title,
-      detail: `Papka: ${s.root}\n\n${detail}`,
-      noLink: true,
-      buttons: ["Ruxsat berish", "Rad etish"],
-      defaultId: 1,
-      cancelId: 1,
-      checkboxLabel: "Bu papkada shu turdagi amallar uchun qayta so'rama",
-    });
-    if (res.response !== 0) return { output: "Foydalanuvchi bu amalni rad etdi.", isError: true };
-    if (res.checkboxChecked) s.autoApprove.add(name);
-  }
-  return runTool(s.root, name, args);
+// To'xtatish tugmasi: shu oynada ishlayotgan asboblar (uzoq buyruqlar) bekor qilinadi
+ipcMain.handle("omni:cancel", (event) => {
+  if (!trusted(event)) throw new Error("Ruxsat yo'q");
+  const s = state.get(event.sender.id);
+  if (s) cancelJobs(s);
 });
 
 // Agent yaratgan faylni odatiy dasturda ochish (masalan HTML -> brauzer).
@@ -151,57 +170,28 @@ const OPENABLE = new Set([".html", ".htm", ".svg", ".png", ".jpg", ".jpeg", ".gi
 ipcMain.handle("omni:open", async (event, rel) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
   const s = state.get(event.sender.id);
-  if (!s?.root) return { ok: false, error: "Papka tanlanmagan" };
+  if (!s?.root) return { ok: false, error: tr(s?.lang, "noFolder") };
   try {
     const abs = resolveInside(s.root, String(rel), { mustExist: true });
-    if (!OPENABLE.has(path.extname(abs).toLowerCase())) return { ok: false, error: "Bu turdagi faylni ochib bo'lmaydi" };
+    if (!OPENABLE.has(path.extname(abs).toLowerCase())) return { ok: false, error: tr(s.lang, "cantOpenType") };
     const err = await shell.openPath(abs);
     return err ? { ok: false, error: err } : { ok: true };
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: errorText(e, s.lang) };
   }
 });
 
 // generate_image asbobi: server yaratgan rasmni papkaga saqlash (ruxsat bilan, faqat rasm formatlari)
-const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
-
 ipcMain.handle("omni:saveImage", async (event, rel, b64) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
   const s = state.get(event.sender.id);
-  if (!s?.root) return { output: "Avval papka tanlang.", isError: true };
-  try {
-    const abs = resolveInside(s.root, String(rel));
-    if (!IMAGE_EXT.has(path.extname(abs).toLowerCase())) return { output: "Faqat .png/.jpg/.webp rasm saqlanadi.", isError: true };
-    const data = Buffer.from(String(b64), "base64");
-    if (data.length > 15 * 1024 * 1024) return { output: "Rasm juda katta.", isError: true };
-    if (!s.autoApprove.has("save_image")) {
-      const win = BrowserWindow.fromWebContents(event.sender);
-      const res = await dialog.showMessageBox(win, {
-        type: "question",
-        title: "AI ruxsat so'rayapti",
-        message: `Rasm saqlash: ${rel}`,
-        detail: `Papka: ${s.root}\n\n${(data.length / 1024).toFixed(0)} KB rasm (AI yaratgan)`,
-        buttons: ["Ruxsat berish", "Rad etish"],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true,
-        checkboxLabel: "Bu papkada rasmlar uchun qayta so'rama",
-      });
-      if (res.response !== 0) return { output: "Foydalanuvchi rasmni saqlashni rad etdi.", isError: true };
-      if (res.checkboxChecked) s.autoApprove.add("save_image");
-    }
-    await require("node:fs/promises").mkdir(path.dirname(abs), { recursive: true });
-    await require("node:fs/promises").writeFile(abs, data);
-    return { output: `Rasm saqlandi: ${rel} (${(data.length / 1024).toFixed(0)} KB)`, isError: false };
-  } catch (e) {
-    return { output: e.message, isError: true };
-  }
+  return saveImage(s, rel, b64, (req) => askApproval(event, s, "save_image", req));
 });
 
 // Papkada tizim terminalini ochish (foydalanuvchi u yerda o'zi buyruq yozadi, masalan rasmiy "claude" CLI)
 const { spawn, spawnSync } = require("node:child_process");
 
-function openTerminal(cwd) {
+function openTerminal(cwd, lang) {
   const run = (cmd, args = []) => {
     const child = spawn(cmd, args, { cwd, detached: true, stdio: "ignore" });
     child.unref();
@@ -215,15 +205,15 @@ function openTerminal(cwd) {
   for (const [cmd, args] of candidates) {
     if (spawnSync("which", [cmd]).status === 0) return run(cmd, args);
   }
-  throw new Error("Terminal dasturi topilmadi");
+  throw new Error(tr(lang, "noTerminal"));
 }
 
 ipcMain.handle("omni:openTerminal", async (event) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
   const s = state.get(event.sender.id);
-  if (!s?.root) return { ok: false, error: "Avval papka tanlang" };
+  if (!s?.root) return { ok: false, error: tr(s?.lang, "pickFirst") };
   try {
-    openTerminal(s.root);
+    openTerminal(s.root, s.lang);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -234,12 +224,12 @@ ipcMain.handle("omni:openTerminal", async (event) => {
 ipcMain.handle("omni:reveal", async (event, rel) => {
   if (!trusted(event)) throw new Error("Ruxsat yo'q");
   const s = state.get(event.sender.id);
-  if (!s?.root) return { ok: false, error: "Papka tanlanmagan" };
+  if (!s?.root) return { ok: false, error: tr(s?.lang, "noFolder") };
   try {
     shell.showItemInFolder(resolveInside(s.root, String(rel), { mustExist: true }));
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: errorText(e, s.lang) };
   }
 });
 
@@ -268,45 +258,67 @@ function send(event, detail) {
   win.webContents.executeJavaScript(js).catch(() => {});
 }
 
-function buildMenu() {
+/** Menyu interfeys tilida (standart rollar ham aniq yorliq bilan — aks holda Electron ularni inglizcha ko'rsatadi). */
+function buildMenu(lang = "uz") {
+  const T = (key) => tr(lang, key);
   const isMac = process.platform === "darwin";
   const template = [
     ...(isMac ? [{ role: "appMenu" }] : []),
     {
       label: "OmniAI",
       submenu: [
-        { label: "Yangi suhbat", accelerator: "CmdOrCtrl+Shift+O", click: () => { send("omni:new-chat"); send("omni:navigate", "/chat"); } },
-        { label: "Agent", accelerator: "CmdOrCtrl+Shift+A", click: () => send("omni:navigate", "/agent") },
-        { label: "Media Studio", click: () => send("omni:navigate", "/media") },
+        { label: T("menu.newChat"), accelerator: "CmdOrCtrl+Shift+O", click: () => { send("omni:new-chat"); send("omni:navigate", "/chat"); } },
+        { label: T("menu.agent"), accelerator: "CmdOrCtrl+Shift+A", click: () => send("omni:navigate", "/agent") },
+        { label: T("menu.media"), click: () => send("omni:navigate", "/media") },
         { type: "separator" },
-        { label: "Sozlamalar", accelerator: "CmdOrCtrl+,", click: () => send("omni:navigate", "/settings") },
-        { label: "Foydalanish", click: () => send("omni:navigate", "/settings?tab=usage") },
+        { label: T("menu.settings"), accelerator: "CmdOrCtrl+,", click: () => send("omni:navigate", "/settings") },
+        { label: T("menu.usage"), click: () => send("omni:navigate", "/settings?tab=usage") },
         { type: "separator" },
-        isMac ? { role: "close", label: "Oynani yopish" } : { role: "quit", label: "Chiqish" },
+        isMac ? { role: "close", label: T("menu.closeWindow") } : { role: "quit", label: T("menu.quit") },
       ],
     },
-    { role: "editMenu", label: "Tahrirlash" },
     {
-      label: "Ko'rinish",
+      label: T("menu.edit"),
       submenu: [
-        { role: "reload", label: "Qayta yuklash" },
-        ...(app.isPackaged ? [] : [{ role: "toggleDevTools", label: "Dasturchi vositalari" }]),
+        { role: "undo", label: T("menu.undo") },
+        { role: "redo", label: T("menu.redo") },
         { type: "separator" },
-        { role: "zoomIn", label: "Kattalashtirish" },
-        { role: "zoomOut", label: "Kichraytirish" },
-        { role: "resetZoom", label: "Asl o'lcham" },
+        { role: "cut", label: T("menu.cut") },
+        { role: "copy", label: T("menu.copy") },
+        { role: "paste", label: T("menu.paste") },
+        { role: "delete", label: T("menu.delete") },
         { type: "separator" },
-        { role: "togglefullscreen", label: "To'liq ekran" },
+        { role: "selectAll", label: T("menu.selectAll") },
       ],
     },
-    { role: "windowMenu", label: "Oyna" },
     {
-      label: "Yordam",
+      label: T("menu.view"),
       submenu: [
-        { label: "Yordam", click: () => send("omni:modal", "help") },
-        { label: "Tezkor tugmalar", accelerator: "CmdOrCtrl+/", click: () => send("omni:modal", "shortcuts") },
+        { role: "reload", label: T("menu.reload") },
+        ...(app.isPackaged ? [] : [{ role: "toggleDevTools", label: T("menu.devTools") }]),
         { type: "separator" },
-        { label: "OmniAI haqida", click: () => send("omni:modal", "about") },
+        { role: "zoomIn", label: T("menu.zoomIn") },
+        { role: "zoomOut", label: T("menu.zoomOut") },
+        { role: "resetZoom", label: T("menu.resetZoom") },
+        { type: "separator" },
+        { role: "togglefullscreen", label: T("menu.fullscreen") },
+      ],
+    },
+    {
+      label: T("menu.window"),
+      submenu: [
+        { role: "minimize", label: T("menu.minimize") },
+        { role: "zoom", label: T("menu.zoom") },
+        ...(isMac ? [{ type: "separator" }, { role: "front", label: T("menu.front") }] : [{ role: "close", label: T("menu.close") }]),
+      ],
+    },
+    {
+      label: T("menu.help"),
+      submenu: [
+        { label: T("menu.help"), click: () => send("omni:modal", "help") },
+        { label: T("menu.shortcuts"), accelerator: "CmdOrCtrl+/", click: () => send("omni:modal", "shortcuts") },
+        { type: "separator" },
+        { label: T("menu.about"), click: () => send("omni:modal", "about") },
       ],
     },
   ];

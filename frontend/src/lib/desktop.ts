@@ -12,6 +12,8 @@ export type OmniDesktop = {
   /** v4+: AI yaratgan rasmni saqlash va papkada terminal ochish */
   saveImage?: (relPath: string, base64: string) => Promise<ToolResult>;
   openTerminal?: () => Promise<{ ok: boolean; error?: string }>;
+  /** v5+: To'xtatish — ishlayotgan asboblarni (uzoq buyruqni) bekor qilish */
+  cancel?: () => Promise<void>;
 };
 
 declare global {
