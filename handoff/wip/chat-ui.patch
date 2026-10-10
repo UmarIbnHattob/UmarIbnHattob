@@ -1,0 +1,1520 @@
+diff --git a/frontend/src/components/CanvasPanel.tsx b/frontend/src/components/CanvasPanel.tsx
+index 43d96fa..790f54a 100644
+--- a/frontend/src/components/CanvasPanel.tsx
++++ b/frontend/src/components/CanvasPanel.tsx
+@@ -1,26 +1,50 @@
+ "use client";
+ 
+ import { useEffect, useRef, useState } from "react";
+-import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
++import { Excalidraw, exportToBlob, restoreElements } from "@excalidraw/excalidraw";
+ import "@excalidraw/excalidraw/index.css";
+-import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+-
+-const STORAGE_KEY = "omniai-canvas-v1";
++import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
++import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
++import { useI18n } from "@/lib/i18n";
++import { loadElements, loadFiles, saveElements, saveFiles } from "@/lib/canvasStore";
+ 
+ /** Tashqi komponent canvasdan rasm olishi uchun ref orqali beriladigan funksiyalar. */
+ export type CanvasHandle = { exportPng: () => Promise<string | null> };
+ 
+-function loadSaved() {
+-  try {
+-    const raw = localStorage.getItem(STORAGE_KEY);
+-    return raw ? { elements: JSON.parse(raw) } : undefined;
+-  } catch {
+-    return undefined;
+-  }
++type Elements = readonly ExcalidrawElement[];
++
++/** Chizmadan AI ga yuboriladigan PNG (base64, prefikssiz). Chizma bo'sh bo'lsa null. */
++async function toPngBase64(elements: Elements, appState: Partial<AppState>, files: BinaryFiles): Promise<string | null> {
++  const live = elements.filter((e) => !e.isDeleted);
++  if (live.length === 0) return null;
++  const blob = await exportToBlob({
++    elements: live,
++    appState: { ...appState, exportBackground: true },
++    files,
++    mimeType: "image/png",
++    maxWidthOrHeight: 1600, // rasm hajmini cheklaymiz (token va trafik tejash)
++  });
++  const bytes = new Uint8Array(await blob.arrayBuffer());
++  let bin = "";
++  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
++  return btoa(bin);
+ }
+ 
++/** Panel hali ochilmagan bo'lsa ham: shu brauzerda saqlangan chizmadan PNG. */
++export async function exportSavedCanvas(userId: string): Promise<string | null> {
++  const saved = loadElements(userId);
++  if (!saved?.length) return null;
++  const elements = restoreElements(saved as Parameters<typeof restoreElements>[0], null);
++  return toPngBase64(elements, { viewBackgroundColor: "#ffffff" }, await loadFiles(userId));
++}
++
++/** Chizmada ishlatilayotgan rasmlarning id lari (saqlash kerakmi — shu bo'yicha aniqlanadi). */
++const usedFileIds = (elements: Elements) =>
++  [...new Set(elements.flatMap((e) => (e.type === "image" && e.fileId && !e.isDeleted ? [e.fileId] : [])))].sort();
++
+ /** Excalidraw doska. `handleRef` orqali AI ga yuboriladigan PNG (base64) olinadi. */
+-export default function CanvasPanel({ handleRef }: { handleRef: { current: CanvasHandle | null } }) {
++export default function CanvasPanel({ handleRef, userId }: { handleRef: { current: CanvasHandle | null }; userId: string }) {
++  const { lang } = useI18n();
+   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+   // Canvas ilova mavzusiga moslashadi (Sozlamalar > Mavzu)
+   const [theme, setTheme] = useState<"light" | "dark">("dark");
+@@ -32,48 +56,67 @@ export default function CanvasPanel({ handleRef }: { handleRef: { current: Canva
+     return () => obs.disconnect();
+   }, []);
+   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
++  const pendingSave = useRef<(() => void) | null>(null);
++  const savedFiles = useRef(""); // oxirgi saqlangan rasmlar to'plami
++
++  // Saqlangan chizma va uning rasmlari (rasmlarsiz reloaddan keyin AI ga bo'sh "placeholder" ketardi)
++  const [initialData] = useState(() =>
++    (async (): Promise<ExcalidrawInitialDataState | null> => {
++      const elements = loadElements(userId);
++      if (!elements) return null;
++      const files = await loadFiles(userId);
++      savedFiles.current = Object.keys(files).sort().join(",");
++      return { elements: elements as Elements, files };
++    })(),
++  );
+ 
+   useEffect(() => {
+     handleRef.current = {
+       exportPng: async () => {
+         const api = apiRef.current;
+-        if (!api) return null;
+-        const elements = api.getSceneElements().filter((e) => !e.isDeleted);
+-        if (elements.length === 0) return null;
+-        const blob = await exportToBlob({
+-          elements,
+-          appState: { ...api.getAppState(), exportBackground: true },
+-          files: api.getFiles(),
+-          mimeType: "image/png",
+-          maxWidthOrHeight: 1600, // rasm hajmini cheklaymiz (token va trafik tejash)
+-        });
+-        const bytes = new Uint8Array(await blob.arrayBuffer());
+-        let bin = "";
+-        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+-        return btoa(bin);
++        if (!api) return exportSavedCanvas(userId);
++        return toPngBase64(api.getSceneElements(), api.getAppState(), api.getFiles());
+       },
+     };
+     return () => {
+       handleRef.current = null;
+     };
+-  }, [handleRef]);
++  }, [handleRef, userId]);
++
++  // Sahifadan chiqishda kutib turgan saqlash yo'qolmasin
++  useEffect(
++    () => () => {
++      clearTimeout(saveTimer.current);
++      pendingSave.current?.();
++    },
++    [],
++  );
+ 
+   return (
+     <div className="h-full w-full">
+       <Excalidraw
+         theme={theme}
++        // Excalidraw da o'zbekcha yo'q: uz uchun inglizcha
++        langCode={lang === "ru" ? "ru-RU" : "en"}
+         excalidrawAPI={(api) => (apiRef.current = api)}
+-        initialData={loadSaved()}
+-        onChange={(elements) => {
++        initialData={initialData}
++        onChange={(elements, _appState, files) => {
+           // Har o'zgarishda emas, 500ms kutib saqlaymiz (faqat shu brauzerda)
+           clearTimeout(saveTimer.current);
+-          saveTimer.current = setTimeout(() => {
+-            try {
+-              localStorage.setItem(STORAGE_KEY, JSON.stringify(elements.filter((e) => !e.isDeleted)));
+-            } catch {
+-              /* joy yetmasa yoki bloklangan bo'lsa, jim o'tamiz */
+-            }
+-          }, 500);
++          pendingSave.current = () => {
++            pendingSave.current = null;
++            saveElements(
++              userId,
++              elements.filter((e) => !e.isDeleted),
++            );
++            const ids = usedFileIds(elements);
++            const sig = ids.join(",");
++            // Rasmlar katta: faqat to'plam o'zgarganda yoziladi. Fayl hali yuklanmagan bo'lsa keyingi safar.
++            if (sig === savedFiles.current || ids.some((id) => !files[id])) return;
++            savedFiles.current = sig;
++            saveFiles(userId, Object.fromEntries(ids.map((id) => [id, files[id]])));
++          };
++          saveTimer.current = setTimeout(() => pendingSave.current?.(), 500);
+         }}
+       />
+     </div>
+diff --git a/frontend/src/components/CodePreview.tsx b/frontend/src/components/CodePreview.tsx
+index 2b87604..413d155 100644
+--- a/frontend/src/components/CodePreview.tsx
++++ b/frontend/src/components/CodePreview.tsx
+@@ -49,7 +49,7 @@ export default function CodePreview({ messages, streaming }: { messages: ChatMes
+       {/* sandbox: allow-same-origin YO'Q — kod ilovaning cookie/localStorage ga kira olmaydi */}
+       <iframe
+         key={reload}
+-        title="Live preview"
++        title={t("preview.iframeTitle")}
+         sandbox="allow-scripts allow-forms allow-modals"
+         srcDoc={srcDoc}
+         className="min-h-0 flex-1 bg-white"
+diff --git a/frontend/src/components/CopyButton.tsx b/frontend/src/components/CopyButton.tsx
+new file mode 100644
+index 0000000..2bf5e48
+--- /dev/null
++++ b/frontend/src/components/CopyButton.tsx
+@@ -0,0 +1,69 @@
++"use client";
++
++import { useEffect, useRef, useState } from "react";
++import { Check, Copy } from "lucide-react";
++import { useI18n } from "@/lib/i18n";
++
++/** Matnni buferga yozadi. Xavfsiz kontekst bo'lmasa (masalan, http) eski usul bilan. */
++export async function copyText(text: string): Promise<boolean> {
++  try {
++    await navigator.clipboard.writeText(text);
++    return true;
++  } catch {
++    try {
++      const ta = document.createElement("textarea");
++      ta.value = text;
++      ta.setAttribute("readonly", "");
++      ta.style.position = "fixed";
++      ta.style.opacity = "0";
++      document.body.appendChild(ta);
++      ta.select();
++      const ok = document.execCommand("copy");
++      ta.remove();
++      return ok;
++    } catch {
++      return false;
++    }
++  }
++}
++
++/** "Nusxa olish" tugmasi: bosilgach ~1.5 s "Nusxa olindi" ko'rinadi. `text` — matn yoki uni qaytaruvchi funksiya. */
++export default function CopyButton({
++  text,
++  label,
++  className = "",
++  showLabel = false,
++}: {
++  text: string | (() => string);
++  label: string;
++  className?: string;
++  showLabel?: boolean;
++}) {
++  const { t } = useI18n();
++  const [copied, setCopied] = useState(false);
++  const timer = useRef<ReturnType<typeof setTimeout>>();
++  useEffect(() => () => clearTimeout(timer.current), []);
++
++  const current = copied ? t("chat.copied") : label;
++  return (
++    <button
++      type="button"
++      onClick={async () => {
++        if (!(await copyText(typeof text === "function" ? text() : text))) return;
++        setCopied(true);
++        clearTimeout(timer.current);
++        timer.current = setTimeout(() => setCopied(false), 1500);
++      }}
++      aria-label={current}
++      title={current}
++      className={`flex items-center gap-1 rounded transition-colors ${className}`}
++    >
++      {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
++      {showLabel && <span>{current}</span>}
++      {/* Ekran o'quvchilar uchun: "Nusxa olindi" e'lon qilinadi */}
++      <span className="sr-only" aria-live="polite">
++        {copied ? t("chat.copied") : ""}
++      </span>
++    </button>
++  );
++}
+diff --git a/frontend/src/components/Markdown.tsx b/frontend/src/components/Markdown.tsx
+index 47779c8..052dd97 100644
+--- a/frontend/src/components/Markdown.tsx
++++ b/frontend/src/components/Markdown.tsx
+@@ -1,27 +1,106 @@
+ "use client";
+ 
+-import { memo } from "react";
+-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
++import { memo, useRef, useState } from "react";
++import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
+ import remarkGfm from "remark-gfm";
+ import rehypeHighlight from "rehype-highlight";
+ import "highlight.js/styles/github-dark.css";
++import { Image as ImageIcon } from "lucide-react";
+ import { fileUrl } from "@/lib/mediaApi";
++import { useI18n } from "@/lib/i18n";
++import CopyButton from "@/components/CopyButton";
+ 
+ const REMARK = [remarkGfm];
+ const REHYPE_HIGHLIGHT = [rehypeHighlight];
+-// AI bergan havolalar yangi oynada ochiladi: chat sahifasidan chiqib ketmaslik uchun
+-const COMPONENTS = {
+-  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+-  // Auto rejimda chatda yaratilgan rasmlar: omni-media://<id> -> Media Studio fayli
+-  img: ({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>) => {
++// Chatda yaratilgan rasm: omni-media://<uuid> (boshqa ko'rinishdagi "id" — masalan ../ — qabul qilinmaydi)
++const MEDIA_RE = /^omni-media:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
++// Ichiga joylangan rasm: faqat rastr formatlar va cheklangan hajm
++const DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp|avif);base64,[a-z0-9+/=\s]+$/i;
++const MAX_DATA_IMAGE = 2_000_000;
++
++const isDataImage = (s: string) => s.length <= MAX_DATA_IMAGE && DATA_IMAGE_RE.test(s);
++
++/** Kod bloki: o'ng yuqori burchakda "nusxa olish" tugmasi (blokning o'zi gorizontal aylanadi). */
++function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
++  const { t } = useI18n();
++  const ref = useRef<HTMLPreElement>(null);
++  return (
++    <div className="group/code relative">
++      <pre ref={ref} {...props} />
++      <CopyButton
++        text={() => ref.current?.innerText ?? ""}
++        label={t("chat.copyCode")}
++        className="absolute right-1.5 top-1.5 bg-white/10 p-1.5 text-[#c9d1d9] opacity-0 hover:bg-white/20 hover:text-white focus-visible:opacity-100 group-hover/code:opacity-100 [@media(hover:none)]:opacity-100"
++      />
++    </div>
++  );
++}
++
++/**
++ * Tashqi (http/https) rasm avtomatik yuklanmaydi: AI javobidagi rasm manzili orqali ma'lumot sizdirilishi mumkin
++ * (prompt-injection). Foydalanuvchi manbani ko'rib, o'zi bosib yuklaydi.
++ */
++function ExternalImage({ src, alt }: { src: string; alt: string }) {
++  const { t } = useI18n();
++  const [show, setShow] = useState(false);
++  let host = src;
++  try {
++    host = new URL(src).host;
++  } catch {
++    /* e'tiborsiz */
++  }
++  if (show) {
++    // eslint-disable-next-line @next/next/no-img-element
++    return <img src={src} alt={alt} referrerPolicy="no-referrer" className="max-h-96 rounded-lg" />;
++  }
++  return (
++    <span className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-400">
++      <ImageIcon size={14} className="shrink-0" />
++      {alt && <span className="min-w-0 break-words">{alt}</span>}
++      <button
++        type="button"
++        onClick={() => setShow(true)}
++        className="rounded bg-neutral-700/60 px-1.5 py-0.5 text-neutral-200 hover:bg-neutral-700"
++      >
++        {t("chat.loadImage", { host })}
++      </button>
++    </span>
++  );
++}
++
++const COMPONENTS: Components = {
++  // AI bergan havolalar yangi oynada ochiladi: chat sahifasidan chiqib ketmaslik uchun.
++  // Rang ikkala mavzuda ham o'qiladigan (yorug' fonda to'q binafsha)
++  a: ({ node: _node, ...props }) => (
++    <a
++      {...props}
++      target="_blank"
++      rel="noopener noreferrer"
++      className="break-words !text-sky-300 [:root[data-theme=light]_&]:!text-violet-700"
++    />
++  ),
++  img: ({ src, alt }) => {
+     const s = typeof src === "string" ? src : "";
+-    const real = s.startsWith("omni-media://") ? fileUrl(s.slice("omni-media://".length)) : s;
++    const media = MEDIA_RE.exec(s);
++    // Auto rejimda chatda yaratilgan rasmlar: omni-media://<id> -> Media Studio fayli
+     // eslint-disable-next-line @next/next/no-img-element
+-    return <img src={real} alt={alt ?? ""} className="develop max-h-96 rounded-lg" />;
++    if (media) return <img src={fileUrl(media[1])} alt={alt ?? ""} className="develop max-h-96 rounded-lg" />;
++    // eslint-disable-next-line @next/next/no-img-element
++    if (isDataImage(s)) return <img src={s} alt={alt ?? ""} className="max-h-96 rounded-lg" />;
++    if (/^https?:\/\//i.test(s)) return <ExternalImage src={s} alt={alt ?? ""} />;
++    return alt ? <span className="text-neutral-500">[{alt}]</span> : null;
+   },
++  pre: ({ node: _node, ...props }) => <CodeBlock {...props} />,
++  // Keng jadval bubble'dan chiqib ketmaydi: o'zi gorizontal aylanadi
++  table: ({ node: _node, ...props }) => (
++    <div className="max-w-full overflow-x-auto">
++      <table {...props} />
++    </div>
++  ),
+ };
+-// omni-media:// manzillari sanitizatsiyada o'chib ketmasligi uchun
+-const urlTransform = (url: string) => (url.startsWith("omni-media://") ? url : defaultUrlTransform(url));
++// omni-media:// va ichiga joylangan rasmlar sanitizatsiyada o'chib ketmasligi uchun (boshqalari — standart tekshiruv)
++const urlTransform = (url: string, key: string) =>
++  MEDIA_RE.test(url) || (key === "src" && isDataImage(url)) ? url : defaultUrlTransform(url);
+ 
+ /**
+  * Markdown + kod bloklari.
+@@ -30,7 +109,7 @@ const urlTransform = (url: string) => (url.startsWith("omni-media://") ? url : d
+  */
+ function Markdown({ children, highlight = true }: { children: string; highlight?: boolean }) {
+   return (
+-    <div className="markdown">
++    <div className="markdown min-w-0 break-words">
+       <ReactMarkdown components={COMPONENTS} urlTransform={urlTransform} remarkPlugins={REMARK} rehypePlugins={highlight ? REHYPE_HIGHLIGHT : []}>
+         {children}
+       </ReactMarkdown>
+diff --git a/frontend/src/components/VoiceButton.tsx b/frontend/src/components/VoiceButton.tsx
+index 4d52883..030e61a 100644
+--- a/frontend/src/components/VoiceButton.tsx
++++ b/frontend/src/components/VoiceButton.tsx
+@@ -4,11 +4,19 @@ import { useEffect, useRef, useState } from "react";
+ import { Loader2, Mic, Square, X } from "lucide-react";
+ import { apiFetch } from "@/lib/api";
+ import { blobToWavBase64 } from "@/lib/wav";
+-import { useI18n } from "@/lib/i18n";
++import { useI18n, type TKey } from "@/lib/i18n";
+ 
+ const MAX_SECONDS = 120;
+ type Phase = "idle" | "recording" | "transcribing";
+ 
++/** getUserMedia xatosi -> tushunarli sabab (mikrofon yo'q / ruxsat yo'q / boshqa). */
++function micErrorKey(e: unknown): TKey {
++  const name = (e as Error)?.name;
++  if (name === "NotFoundError" || name === "OverconstrainedError" || name === "DevicesNotFoundError") return "voice.noMic";
++  if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") return "voice.denied";
++  return "voice.micError";
++}
++
+ /**
+  * Ovozli buyruq: bosing — gapiring — yana bosing. Matn kiritish maydoniga qo'shiladi.
+  * Yozish paytida ovoz balandligiga qarab "raqsga tushadigan" rangli to'lqin ko'rinadi.
+@@ -21,8 +29,18 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
+   const streamRef = useRef<MediaStream | null>(null);
+   const cancelled = useRef(false);
+   const canvasRef = useRef<HTMLCanvasElement>(null);
++  const widgetRef = useRef<HTMLDivElement>(null);
+   const rafRef = useRef<number>(0);
+   const audioCtxRef = useRef<AudioContext | null>(null);
++  // Mikrofon ruxsati kutilayotganda ikkinchi bosish ikkinchi oqim ochmasin
++  const startingRef = useRef(false);
++  const aliveRef = useRef(true);
++  const transcribeRef = useRef<AbortController | null>(null);
++  // Eng so'nggi callbacklar: yozuv boshlangan paytdagi eski holat (suhbat, model, matn) ishlatilmasin
++  const onTextRef = useRef(onText);
++  const onErrorRef = useRef(onError);
++  onTextRef.current = onText;
++  onErrorRef.current = onError;
+ 
+   const cleanup = () => {
+     cancelAnimationFrame(rafRef.current);
+@@ -31,7 +49,17 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
+     streamRef.current = null;
+     audioCtxRef.current = null;
+   };
+-  useEffect(() => cleanup, []);
++  // Sahifadan chiqildi (yoki komponent yopildi): yozuv bekor, matnga aylantirish to'xtatiladi, hech narsa yuborilmaydi
++  useEffect(() => {
++    aliveRef.current = true;
++    return () => {
++      aliveRef.current = false;
++      cancelled.current = true;
++      transcribeRef.current?.abort();
++      if (recRef.current?.state === "recording") recRef.current.stop();
++      cleanup();
++    };
++  }, []);
+ 
+   // Taymer va avtomatik to'xtash
+   useEffect(() => {
+@@ -44,17 +72,28 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
+     if (phase === "recording" && sec >= MAX_SECONDS) stop();
+   }, [sec, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+ 
+-  // Esc — bekor qilish
++  // Esc — bekor qilish. Lekin avval ochiq qatlam (model tanlagich, menyu, oyna) yopiladi:
++  // fokus o'sha qatlam ichida bo'lsa yoki modal oyna ochiq bo'lsa yozuvga tegmaymiz
+   useEffect(() => {
+     if (phase !== "recording") return;
+-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && cancel();
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key !== "Escape" || e.defaultPrevented) return;
++      const el = document.activeElement;
++      const free = !el || el === document.body || el.tagName === "TEXTAREA" || !!widgetRef.current?.contains(el);
++      if (!free || document.querySelector('[aria-modal="true"]')) return;
++      cancel();
++    };
+     window.addEventListener("keydown", onKey);
+     return () => window.removeEventListener("keydown", onKey);
+   }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+ 
+   function draw(analyser: AnalyserNode) {
+     const canvas = canvasRef.current;
+-    if (!canvas) return;
++    // Canvas hali chizilmagan bo'lishi mumkin (React keyingi kadrda qo'yadi): keyingi kadrda yana urinamiz
++    if (!canvas) {
++      rafRef.current = requestAnimationFrame(() => draw(analyser));
++      return;
++    }
+     const g = canvas.getContext("2d")!;
+     const data = new Uint8Array(analyser.frequencyBinCount);
+     const bars = 24;
+@@ -82,12 +121,21 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
+   }
+ 
+   async function start() {
++    if (startingRef.current || phase !== "idle") return;
++    startingRef.current = true;
+     cancelled.current = false;
+     let stream: MediaStream;
+     try {
+       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+-    } catch {
+-      onError(t("voice.denied"));
++    } catch (e) {
++      startingRef.current = false;
++      if (aliveRef.current) onErrorRef.current(t(micErrorKey(e)));
++      return;
++    }
++    startingRef.current = false;
++    if (!aliveRef.current) {
++      // Ruxsat kutilayotganda sahifadan chiqib ketildi: mikrofonni darhol bo'shatamiz
++      stream.getTracks().forEach((tr) => tr.stop());
+       return;
+     }
+     streamRef.current = stream;
+@@ -102,29 +150,35 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
+     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+     rec.onstop = async () => {
+       cleanup();
+-      if (cancelled.current || !chunks.length) {
+-        setPhase("idle");
++      if (cancelled.current || !chunks.length || !aliveRef.current) {
++        if (aliveRef.current) setPhase("idle");
+         return;
+       }
+       setPhase("transcribing");
++      const ctrl = new AbortController();
++      transcribeRef.current = ctrl;
+       try {
+         const audio = await blobToWavBase64(new Blob(chunks, { type: rec.mimeType }));
++        if (ctrl.signal.aborted) return;
+         const { text } = await apiFetch<{ text: string }>("/voice/transcribe", {
+           method: "POST",
+           body: JSON.stringify({ audio, mime: "audio/wav" }),
++          signal: ctrl.signal,
+         });
+-        if (text) onText(text);
+-        else onError(t("voice.noSpeech"));
++        if (ctrl.signal.aborted || !aliveRef.current) return;
++        if (text) onTextRef.current(text);
++        else onErrorRef.current(t("voice.noSpeech"));
+       } catch (e) {
+-        onError((e as Error).message);
++        if ((e as Error).name !== "AbortError" && aliveRef.current) onErrorRef.current((e as Error).message);
+       } finally {
+-        setPhase("idle");
++        if (transcribeRef.current === ctrl) transcribeRef.current = null;
++        if (aliveRef.current) setPhase("idle");
+       }
+     };
+     recRef.current = rec;
+     rec.start();
+     setPhase("recording");
+-    requestAnimationFrame(() => draw(analyser));
++    rafRef.current = requestAnimationFrame(() => draw(analyser));
+   }
+ 
+   function stop() {
+@@ -138,19 +192,22 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
+ 
+   if (phase === "recording") {
+     return (
+-      <div className="msg-in flex items-center gap-2 rounded-md border border-violet-500/40 bg-neutral-950 px-2">
+-        <span className="relative flex h-2.5 w-2.5">
++      <div
++        ref={widgetRef}
++        className="msg-in flex min-w-0 max-w-[55%] shrink-0 items-center gap-1.5 rounded-md border border-violet-500/40 bg-neutral-950 px-2 sm:gap-2"
++      >
++        <span className="relative flex h-2.5 w-2.5 shrink-0">
+           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+           <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+         </span>
+-        <canvas ref={canvasRef} width={120} height={32} className="h-8 w-[120px]" />
+-        <span className="w-10 font-mono text-xs tabular-nums text-neutral-400">
++        <canvas ref={canvasRef} width={120} height={32} className="h-8 w-12 min-w-0 sm:w-[120px]" />
++        <span className="w-9 shrink-0 font-mono text-xs tabular-nums text-neutral-400">
+           {Math.floor(sec / 60)}:{String(sec % 60).padStart(2, "0")}
+         </span>
+-        <button onClick={cancel} aria-label={t("voice.cancel")} className="rounded p-1 text-neutral-400 hover:text-neutral-50">
++        <button onClick={cancel} aria-label={t("voice.cancel")} className="shrink-0 rounded p-1 text-neutral-400 hover:text-neutral-50">
+           <X size={14} />
+         </button>
+-        <button onClick={stop} aria-label={t("voice.finish")} className="rounded bg-red-600 p-1.5 hover:bg-red-500">
++        <button onClick={stop} aria-label={t("voice.finish")} className="shrink-0 rounded bg-red-600 p-1.5 text-white hover:bg-red-500">
+           <Square size={12} />
+         </button>
+       </div>
+@@ -163,7 +220,7 @@ export default function VoiceButton({ onText, onError }: { onText: (t: string) =
+       disabled={phase === "transcribing"}
+       aria-label={t("voice.button")}
+       title={t("voice.button")}
+-      className="rounded-md border border-neutral-700 px-3 text-neutral-300 transition hover:border-violet-500 hover:text-neutral-50 disabled:opacity-60"
++      className="shrink-0 rounded-md border border-neutral-700 px-3 text-neutral-300 transition hover:border-violet-500 hover:text-neutral-50 disabled:opacity-60"
+     >
+       {phase === "transcribing" ? <Loader2 size={16} className="animate-spin" /> : <Mic size={16} />}
+     </button>
+diff --git a/frontend/src/hooks/useChat.ts b/frontend/src/hooks/useChat.ts
+index 1949698..8fa28d6 100644
+--- a/frontend/src/hooks/useChat.ts
++++ b/frontend/src/hooks/useChat.ts
+@@ -3,14 +3,35 @@
+ import { useCallback, useEffect, useRef, useState } from "react";
+ import * as api from "@/lib/chatApi";
+ import { RequestError } from "@/lib/api";
++import { useI18n } from "@/lib/i18n";
+ 
+ const MODEL_KEY = "omniai-model";
++// Yuborishdan keyingi shu vaqt ichida "To'xtatish" e'tiborsiz: "Yuborish" ni ikki marta bosish javobni bekor qilmasin
++const STOP_GUARD_MS = 500;
++const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++/** Faol suhbat manzilda turadi (/chat?c=<id>): sahifa qayta yuklansa o'sha suhbat ochiladi. */
++function syncUrl(id: string | null) {
++  try {
++    const url = new URL(window.location.href);
++    if (!url.pathname.startsWith("/chat")) return; // foydalanuvchi boshqa sahifaga o'tib ulgurgan
++    if (id) url.searchParams.set("c", id);
++    else url.searchParams.delete("c");
++    window.history.replaceState(window.history.state, "", url);
++  } catch {
++    /* e'tiborsiz */
++  }
++}
+ 
+ /** Chat holati: suhbatlar, xabarlar, tanlangan model va oqimli yuborish. */
+ export function useChat(defaultModel: string | null = null) {
++  const { t } = useI18n();
+   const [models, setModels] = useState<api.ModelInfo[]>([]);
+   const [model, setModel] = useState<string>("");
+   const [conversations, setConversations] = useState<api.Conversation[]>([]);
++  const [query, setQuery] = useState("");
++  const [hasMore, setHasMore] = useState(false);
++  const [loadingMore, setLoadingMore] = useState(false);
+   const [activeId, setActiveId] = useState<string | null>(null);
+   const [messages, setMessages] = useState<api.ChatMessage[]>([]);
+   const [streaming, setStreaming] = useState(false);
+@@ -19,11 +40,119 @@ export function useChat(defaultModel: string | null = null) {
+   const abortRef = useRef<AbortController | null>(null);
+   // Har bir yuborish/suhbat almashuvi raqamni oshiradi: eski oqimning kechikkan bo'laklari yangi suhbatga yozilmaydi
+   const runRef = useRef(0);
++  // State keyingi chizishda yangilanadi: ikki marta tez bosishni shu ref to'xtatadi
++  const streamingRef = useRef(false);
++  const sentAtRef = useRef(0);
++  const activeRef = useRef<string | null>(null);
++  activeRef.current = activeId;
++  // Ro'yxat so'rovlari: eskirgan javob (masalan, qidiruv tez o'zgarganda) yangisini bosib ketmasin
++  const listRunRef = useRef(0);
++  const queryRef = useRef("");
++  const loadedRef = useRef(0);
++  const tRef = useRef(t);
++  tRef.current = t;
++
++  /** Foydalanuvchiga ko'rsatiladigan xato matni (tarmoq xatolari tarjima qilinadi). */
++  const describe = useCallback((e: unknown) => {
++    if (e instanceof api.ConnectionError) return tRef.current(e.sent ? "chat.connectionLost" : "chat.offline");
++    return (e as Error).message;
++  }, []);
+ 
+   const refreshConversations = useCallback(async () => {
+-    setConversations(await api.getConversations());
++    const run = ++listRunRef.current;
++    // Oldin "Yana yuklash" bilan ochilgan sahifalar ham qolsin
++    const limit = Math.min(200, Math.max(api.PAGE_SIZE, loadedRef.current));
++    const list = await api.getConversations({ q: queryRef.current, limit });
++    if (run !== listRunRef.current) return;
++    loadedRef.current = list.length;
++    setConversations(list);
++    setHasMore(list.length === limit);
+   }, []);
+ 
++  const loadMore = useCallback(async () => {
++    const last = conversations[conversations.length - 1];
++    if (!last || loadingMore) return;
++    const run = listRunRef.current;
++    setLoadingMore(true);
++    try {
++      const page = await api.getConversations({ q: queryRef.current, after: last });
++      if (run !== listRunRef.current) return;
++      setConversations((prev) => {
++        const seen = new Set(prev.map((c) => c.id));
++        const next = [...prev, ...page.filter((c) => !seen.has(c.id))];
++        loadedRef.current = next.length;
++        return next;
++      });
++      setHasMore(page.length === api.PAGE_SIZE);
++    } catch (e) {
++      setError(describe(e));
++    } finally {
++      setLoadingMore(false);
++    }
++  }, [conversations, loadingMore, describe]);
++
++  /** Sarlavha bo'yicha qidiruv (bo'sh matn — hammasi). */
++  const search = useCallback(
++    (q: string) => {
++      queryRef.current = q;
++      loadedRef.current = 0;
++      setQuery(q);
++      refreshConversations().catch((e) => setError(describe(e)));
++    },
++    [refreshConversations, describe],
++  );
++
++  const chooseModel = useCallback((id: string) => {
++    setModel(id);
++    try {
++      localStorage.setItem(MODEL_KEY, id);
++    } catch {
++      /* e'tiborsiz */
++    }
++  }, []);
++
++  /** Joriy suhbatdan chiqib, yangi (bo'sh) suhbatga o'tadi. `notice` — nima uchunligi (masalan, suhbat o'chirilgan). */
++  const resetToNew = useCallback(
++    (notice: string | null) => {
++      setActiveId(null);
++      syncUrl(null);
++      setMessages([]);
++      setError(notice);
++      refreshConversations().catch(() => {});
++    },
++    [refreshConversations],
++  );
++
++  const select = useCallback(
++    async (id: string | null, { quiet = false }: { quiet?: boolean } = {}) => {
++      // Javob yozilayotgan bo'lsa to'xtatamiz: aks holda bo'laklar yangi suhbatga yozilib qoladi.
++      // (Server qisman javobni o'zi saqlaydi.)
++      abortRef.current?.abort();
++      const run = ++runRef.current;
++      streamingRef.current = false;
++      setStreaming(false);
++      setActiveId(id);
++      syncUrl(id);
++      // Yangi suhbat standart model bilan boshlanadi
++      if (id === null && defaultModel) setModel(defaultModel);
++      setError(null);
++      if (!id) {
++        setMessages([]);
++        return;
++      }
++      try {
++        const list = await api.getMessages(id);
++        if (run === runRef.current) setMessages(list);
++      } catch (e) {
++        if (run !== runRef.current) return;
++        // Suhbat topilmadi (boshqa oynada o'chirilgan yoki manzildagi id noto'g'ri): yangi suhbat ochiladi
++        if (e instanceof RequestError) resetToNew(quiet ? null : tRef.current("chat.convGone"));
++        else setError(describe(e));
++      }
++    },
++    [defaultModel, describe, resetToNew],
++  );
++
+   useEffect(() => {
+     (async () => {
+       try {
+@@ -39,38 +168,17 @@ export function useChat(defaultModel: string | null = null) {
+         // Sozlamalardagi standart model > shu brauzerda oxirgi tanlangan > ro'yxatdagi birinchisi
+         const pick = [defaultModel, saved].find((id) => id && (id === "auto" || list.some((m) => m.id === id)));
+         setModel(pick ?? "auto");
+-        await refreshConversations();
+       } catch (e) {
+-        setError((e as Error).message);
++        setError(describe(e));
+       }
+     })();
++    refreshConversations().catch((e) => setError(describe(e)));
++    // Sahifa qayta yuklanganda faol suhbat manzildan tiklanadi; noma'lum id jimgina e'tiborsiz qoldiriladi
++    const fromUrl = new URLSearchParams(window.location.search).get("c");
++    if (fromUrl && UUID_RE.test(fromUrl)) select(fromUrl, { quiet: true });
++    else if (fromUrl) syncUrl(null);
+   }, [refreshConversations]); // eslint-disable-line react-hooks/exhaustive-deps
+ 
+-  const chooseModel = useCallback((id: string) => {
+-    setModel(id);
+-    try {
+-      localStorage.setItem(MODEL_KEY, id);
+-    } catch {
+-      /* e'tiborsiz */
+-    }
+-  }, []);
+-
+-  const select = useCallback(async (id: string | null) => {
+-    // Javob yozilayotgan bo'lsa to'xtatamiz: aks holda bo'laklar yangi suhbatga yozilib qoladi.
+-    // (Server qisman javobni o'zi saqlaydi.)
+-    abortRef.current?.abort();
+-    runRef.current++;
+-    setActiveId(id);
+-    // Yangi suhbat standart model bilan boshlanadi
+-    if (id === null && defaultModel) setModel(defaultModel);
+-    setError(null);
+-    try {
+-      setMessages(id ? await api.getMessages(id) : []);
+-    } catch (e) {
+-      setError((e as Error).message);
+-    }
+-  }, [defaultModel]);
+-
+   // Ctrl+Shift+O (yoki desktop menyusi) — yangi suhbat
+   useEffect(() => {
+     const onNew = () => select(null);
+@@ -82,23 +190,58 @@ export function useChat(defaultModel: string | null = null) {
+     async (id: string) => {
+       try {
+         await api.deleteConversation(id);
+-        if (id === activeId) await select(null);
+-        await refreshConversations();
++        if (id === activeRef.current) await select(null);
++        setConversations((list) => list.filter((c) => c.id !== id));
+       } catch (e) {
+-        setError((e as Error).message);
++        setError(describe(e));
+       }
++      refreshConversations().catch(() => {});
+     },
+-    [activeId, select, refreshConversations],
++    [select, refreshConversations, describe],
+   );
+ 
++  const rename = useCallback(
++    async (id: string, title: string) => {
++      const clean = title.trim();
++      if (!clean) return;
++      // Darhol ko'rinsin, keyin server javobi bilan tasdiqlanadi
++      setConversations((list) => list.map((c) => (c.id === id ? { ...c, title: clean } : c)));
++      try {
++        const saved = await api.renameConversation(id, clean);
++        setConversations((list) => list.map((c) => (c.id === id ? { ...c, title: saved.title } : c)));
++      } catch (e) {
++        setError(describe(e));
++        refreshConversations().catch(() => {});
++      }
++    },
++    [refreshConversations, describe],
++  );
++
++  /** Suhbat hali bormi? (Xatodan keyin: boshqa oynada o'chirilgan bo'lsa yangi suhbatga o'tamiz.) */
++  const isGone = useCallback(async (id: string) => {
++    try {
++      await api.getMessages(id);
++      return false;
++    } catch (e) {
++      return e instanceof RequestError;
++    }
++  }, []);
++
+   const send = useCallback(
+     async (text: string, image: string | null = null) => {
+-      if (!text.trim() || streaming || !model) return;
++      if (!text.trim() || streamingRef.current || !model) return;
++      streamingRef.current = true;
++      sentAtRef.current = Date.now();
+       setError(null);
+       setRestoreText(null);
+       setStreaming(true);
+       const run = ++runRef.current;
+       const current = () => runRef.current === run;
++      const ctrl = new AbortController();
++      abortRef.current = ctrl;
++      const uid = `u-${run}-${Date.now()}`;
++      const aid = `a-${run}-${Date.now()}`;
++      let received = false;
+ 
+       // Kelgan bo'laklarni yig'ib, ~50 ms da bir marta ekranga chiqaramiz:
+       // har bo'lakda qayta chizish uzun javobda brauzerni qotiradi
+@@ -109,72 +252,130 @@ export function useChat(defaultModel: string | null = null) {
+         if (!pending || !current()) return;
+         const chunk = pending;
+         pending = "";
+-        setMessages((m) => {
+-          const copy = [...m];
+-          const last = copy[copy.length - 1];
+-          copy[copy.length - 1] = { ...last, content: last.content + chunk };
+-          return copy;
+-        });
++        setMessages((m) => m.map((x) => (x.id === aid ? { ...x, content: x.content + chunk } : x)));
+       };
++      // Javob matni kelmagan navbat: pufakchalar olinadi, yozilgan matn kiritish maydoniga qaytadi
++      const undoTurn = () => {
++        if (!current()) return;
++        setMessages((m) => m.filter((x) => x.id !== uid && x.id !== aid));
++        setRestoreText(text);
++      };
++
++      // Foydalanuvchi xabari va bo'sh javob o'rni darhol ko'rinadi (yangi suhbat yaratilishini kutmasdan)
++      setMessages((m) => [
++        ...m,
++        { id: uid, role: "user", content: text, model: null, has_canvas: !!image },
++        { id: aid, role: "assistant", content: "", model },
++      ]);
+ 
++      let id = activeId;
++      let created = false;
+       try {
+-        let id = activeId;
+         if (!id) {
+           id = (await api.createConversation()).id;
++          created = true;
++          if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
+           setActiveId(id);
++          syncUrl(id);
+         }
+-        // Foydalanuvchi xabari va bo'sh javob o'rni darhol ko'rinadi
+-        setMessages((m) => [
+-          ...m,
+-          { id: `u-${Date.now()}`, role: "user", content: text, model: null, has_canvas: !!image },
+-          { id: `a-${Date.now()}`, role: "assistant", content: "", model },
+-        ]);
+-        abortRef.current = new AbortController();
+         await api.streamMessage(
+           id,
+           text,
+           model,
+           image,
+           (delta) => {
++            if (delta) received = true;
+             pending += delta;
+             timer ??= setTimeout(flush, 50);
+           },
+-          abortRef.current.signal,
+-          // Auto rejim: server qaysi modelni tanlaganini aytadi
+-          (routed, label, reason) =>
+-            current() &&
+-            setMessages((m) => {
+-              const copy = [...m];
+-              copy[copy.length - 1] = { ...copy[copy.length - 1], model: routed, route: `${label} · ${reason}` };
+-              return copy;
+-            }),
++          ctrl.signal,
++          // Auto rejim: server qaysi modelni (va nima uchun) tanlaganini aytadi
++          (routed, route) =>
++            current() && setMessages((m) => m.map((x) => (x.id === aid ? { ...x, model: routed, route } : x))),
+         );
+       } catch (e) {
++        if (timer) clearTimeout(timer);
++        flush();
++        // Birinchi xabari saqlanmagan yangi suhbat ro'yxatda bo'sh "Yangi suhbat" bo'lib qolmasin
++        const dropCreated = async () => {
++          if (!created || !id) return;
++          await api.deleteConversation(id).catch(() => {});
++          if (current()) {
++            setActiveId(null);
++            syncUrl(null);
++          }
++        };
++        const keepTurn = received; // qisman javob serverda saqlangan
+         if ((e as Error).name === "AbortError") {
+-          /* foydalanuvchi to'xtatdi */
+-        } else if (e instanceof RequestError) {
+-          // Server so'rovni rad etdi (xabar saqlanmadi): pufakchalarni olib, matnni qaytaramiz
+-          if (current()) setMessages((m) => m.slice(0, -2));
+-          setRestoreText(text);
+-          setError(e.message);
++          // Foydalanuvchi to'xtatdi (yoki boshqa suhbatga o'tdi): matn kelmagan bo'lsa server savolni ham o'chirgan
++          if (!keepTurn) {
++            undoTurn();
++            await dropCreated();
++          }
++        } else if (e instanceof api.ConnectionError) {
++          if (current()) setError(describe(e));
++          if (!keepTurn) {
++            undoTurn();
++            await dropCreated();
++          }
++        } else if (e instanceof RequestError || (e instanceof api.StreamError && e.userMessageRemoved)) {
++          // Server so'rovni rad etdi yoki javob bo'lmadi (savol saqlanmadi)
++          undoTurn();
++          if (current()) setError(e.message);
++          await dropCreated();
++          // Suhbat boshqa oynada o'chirilgan bo'lsa (404), yangi suhbatga o'tamiz
++          if (!created && id && e instanceof RequestError && current() && (await isGone(id)) && current()) {
++            resetToNew(tRef.current("chat.convGone"));
++          }
+         } else {
+-          setError((e as Error).message);
++          if (current()) setError(describe(e));
++          // Javob davomida suhbat o'chirib yuborilgan bo'lishi mumkin
++          if (id && current() && (await isGone(id)) && current()) {
++            resetToNew(tRef.current("chat.convGone"));
++            setRestoreText(text);
++          }
+         }
+       } finally {
+         if (timer) clearTimeout(timer);
+         flush();
+-        setStreaming(false);
+-        // Bo'sh qolgan javob o'rnini olib tashlaymiz
+-        if (current()) setMessages((m) =>
+-          m.length && m[m.length - 1].role === "assistant" && !m[m.length - 1].content ? m.slice(0, -1) : m,
+-        );
++        if (abortRef.current === ctrl) abortRef.current = null;
++        if (current()) {
++          streamingRef.current = false;
++          setStreaming(false);
++          // Bo'sh qolgan javob o'rnini olib tashlaymiz
++          setMessages((m) => m.filter((x) => !(x.id === aid && !x.content)));
++        }
+         refreshConversations().catch(() => {});
+       }
+     },
+-    [activeId, model, streaming, refreshConversations],
++    [activeId, model, refreshConversations, describe, isGone, resetToNew],
+   );
+ 
+-  const stop = useCallback(() => abortRef.current?.abort(), []);
++  const stop = useCallback(() => {
++    if (Date.now() - sentAtRef.current < STOP_GUARD_MS) return;
++    abortRef.current?.abort();
++  }, []);
+ 
+-  return { restoreText, models, model, setModel: chooseModel, conversations, activeId, messages, streaming, error, select, remove, send, stop };
++  return {
++    restoreText,
++    models,
++    model,
++    setModel: chooseModel,
++    conversations,
++    query,
++    search,
++    hasMore,
++    loadMore,
++    loadingMore,
++    activeId,
++    messages,
++    streaming,
++    error,
++    setError,
++    select,
++    remove,
++    rename,
++    send,
++    stop,
++  };
+ }
+diff --git a/frontend/src/hooks/useDrawer.ts b/frontend/src/hooks/useDrawer.ts
+new file mode 100644
+index 0000000..8b3a563
+--- /dev/null
++++ b/frontend/src/hooks/useDrawer.ts
+@@ -0,0 +1,65 @@
++"use client";
++
++import { useEffect, useRef, type RefObject } from "react";
++
++const FOCUSABLE =
++  'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
++
++/**
++ * Chetdan chiqadigan panel (drawer) uchun: ochilganda fokus panel ichiga o'tadi va Tab bilan undan chiqmaydi,
++ * Esc yopadi, yopilganda fokus ochgan tugmaga qaytadi. `closeAt` media so'rovi mos kelsa (katta ekran —
++ * panel doimiy ko'rinadi) drawer holati yopiladi.
++ */
++export function useDrawer(
++  open: boolean,
++  close: () => void,
++  panelRef: RefObject<HTMLElement>,
++  triggerRef: RefObject<HTMLElement>,
++  closeAt?: string,
++) {
++  const closeRef = useRef(close);
++  closeRef.current = close;
++
++  useEffect(() => {
++    if (!open) return;
++    const panel = panelRef.current;
++    const trigger = triggerRef.current;
++    const items = () => [...(panel?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((el) => el.getClientRects().length > 0);
++    // Panel ko'rinadigan bo'lgach (keyingi kadrda) birinchi elementga fokus
++    const raf = requestAnimationFrame(() => items()[0]?.focus());
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key === "Escape" && !e.defaultPrevented) {
++        closeRef.current();
++        return;
++      }
++      if (e.key !== "Tab") return;
++      const list = items();
++      if (!list.length) return;
++      const first = list[0];
++      const last = list[list.length - 1];
++      const active = document.activeElement;
++      if (!panel?.contains(active)) {
++        e.preventDefault();
++        first.focus();
++      } else if (e.shiftKey && active === first) {
++        e.preventDefault();
++        last.focus();
++      } else if (!e.shiftKey && active === last) {
++        e.preventDefault();
++        first.focus();
++      }
++    };
++    window.addEventListener("keydown", onKey);
++    const mq = closeAt ? window.matchMedia(closeAt) : null;
++    const onMq = () => mq?.matches && closeRef.current();
++    mq?.addEventListener("change", onMq);
++    return () => {
++      cancelAnimationFrame(raf);
++      window.removeEventListener("keydown", onKey);
++      mq?.removeEventListener("change", onMq);
++      // Fokus panel ichida qolgan bo'lsa (yoki yo'qolgan bo'lsa), ochgan tugmaga qaytaramiz
++      const active = document.activeElement;
++      if (!active || active === document.body || panel?.contains(active)) trigger?.focus({ preventScroll: true });
++    };
++  }, [open, panelRef, triggerRef, closeAt]);
++}
+diff --git a/frontend/src/hooks/useResizable.ts b/frontend/src/hooks/useResizable.ts
+index 16b8a8f..e27dd95 100644
+--- a/frontend/src/hooks/useResizable.ts
++++ b/frontend/src/hooks/useResizable.ts
+@@ -2,42 +2,70 @@
+ 
+ import { useCallback, useEffect, useRef, useState } from "react";
+ 
+-/** Ikki panel orasidagi sudraladigan ajratgich: o'ng panel kengligini (px) boshqaradi. */
+-export function useResizable(initial = 520, min = 320, maxRatio = 0.75) {
+-  const [width, setWidth] = useState(initial);
++/**
++ * Ikki panel orasidagi sudraladigan ajratgich: o'ng panel kengligini (px) boshqaradi.
++ * Kenglik doim konteynerga moslanadi (oyna o'zgarsa ham): chap tomonda kamida `keep` px qoladi.
++ * `fits=false` — yonma-yon joy yetmaydi (panel ustma-ust ochilishi kerak).
++ */
++export function useResizable(initial = 520, min = 320, keep = 360) {
++  // Foydalanuvchi sudrab tanlagan kenglik (null — avtomatik: konteynerning ~40% i)
++  const [desired, setDesired] = useState<number | null>(null);
++  const [available, setAvailable] = useState(0);
+   const dragging = useRef(false);
+   const containerRef = useRef<HTMLDivElement>(null);
+ 
+-  const onMouseDown = useCallback((e: React.MouseEvent) => {
++  // Konteyner kengligini kuzatamiz: oyna kichraysa panel ham kichrayadi, chat ustuni yo'qolib qolmaydi
++  useEffect(() => {
++    const el = containerRef.current;
++    if (!el) return;
++    const measure = () => setAvailable(el.getBoundingClientRect().width);
++    measure();
++    const obs = new ResizeObserver(measure);
++    obs.observe(el);
++    return () => obs.disconnect();
++  }, []);
++
++  const max = Math.max(0, available - keep - 4); // 4 — ajratgich chizig'i
++  const fits = available > 0 && max >= min;
++  const auto = Math.max(min, Math.min(initial, available * 0.4));
++  const width = Math.round(Math.max(min, Math.min(desired ?? auto, max)));
++
++  const onPointerDown = useCallback((e: React.PointerEvent) => {
+     e.preventDefault();
+     dragging.current = true;
+     document.body.style.userSelect = "none";
+   }, []);
+ 
+-  // Boshlang'ich kenglik ekranga moslashadi: kichik ekranda chat siqilib qolmasin
+-  useEffect(() => {
+-    const w = containerRef.current?.getBoundingClientRect().width;
+-    if (w) setWidth(Math.round(Math.max(min, Math.min(initial, w * 0.4))));
+-  }, [initial, min]);
++  // Klaviatura: ajratgichda ←/→ panelni kengaytiradi/toraytiradi
++  const onKeyDown = useCallback(
++    (e: React.KeyboardEvent) => {
++      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
++      e.preventDefault();
++      setDesired(Math.max(min, Math.min(width + (e.key === "ArrowLeft" ? 32 : -32), max)));
++    },
++    [width, min, max],
++  );
+ 
+   useEffect(() => {
+-    const move = (e: MouseEvent) => {
++    const move = (e: PointerEvent) => {
+       if (!dragging.current || !containerRef.current) return;
+       const rect = containerRef.current.getBoundingClientRect();
+-      const next = rect.right - e.clientX;
+-      setWidth(Math.max(min, Math.min(next, rect.width * maxRatio)));
++      setDesired(Math.max(min, Math.min(rect.right - e.clientX, rect.width - keep - 4)));
+     };
+     const up = () => {
++      if (!dragging.current) return;
+       dragging.current = false;
+       document.body.style.userSelect = "";
+     };
+-    window.addEventListener("mousemove", move);
+-    window.addEventListener("mouseup", up);
++    window.addEventListener("pointermove", move);
++    window.addEventListener("pointerup", up);
++    window.addEventListener("pointercancel", up);
+     return () => {
+-      window.removeEventListener("mousemove", move);
+-      window.removeEventListener("mouseup", up);
++      window.removeEventListener("pointermove", move);
++      window.removeEventListener("pointerup", up);
++      window.removeEventListener("pointercancel", up);
+     };
+-  }, [min, maxRatio]);
++  }, [min, keep]);
+ 
+-  return { width, containerRef, onMouseDown };
++  return { width, fits, min, max, containerRef, onPointerDown, onKeyDown };
+ }
+diff --git a/frontend/src/lib/canvasStore.ts b/frontend/src/lib/canvasStore.ts
+new file mode 100644
+index 0000000..99e9ff7
+--- /dev/null
++++ b/frontend/src/lib/canvasStore.ts
+@@ -0,0 +1,86 @@
++/**
++ * Canvas (Excalidraw) chizmasi faqat shu brauzerda, har bir foydalanuvchiga alohida saqlanadi.
++ * Elementlar — localStorage (`omniai-canvas-v1:<userId>`), qo'yilgan rasmlar (katta dataURL) — IndexedDB.
++ * Chiqishda (logout, hisobni o'chirish) hammasi tozalanadi: keyingi foydalanuvchi oldingisining chizmasini ko'rmaydi.
++ */
++import type { BinaryFiles } from "@excalidraw/excalidraw/types";
++
++const PREFIX = "omniai-canvas-v1";
++const DB_NAME = "omniai-canvas";
++const STORE = "files";
++
++const sceneKey = (userId: string) => `${PREFIX}:${userId}`;
++
++/** Saqlangan elementlar (bo'lmasa null). */
++export function loadElements(userId: string): unknown[] | null {
++  try {
++    // Eski umumiy kalit kimning chizmasi ekani noma'lum: hech kimga ko'rsatmay o'chiramiz
++    localStorage.removeItem(PREFIX);
++    const raw = localStorage.getItem(sceneKey(userId));
++    return raw ? JSON.parse(raw) : null;
++  } catch {
++    return null;
++  }
++}
++
++export function saveElements(userId: string, elements: readonly unknown[]) {
++  try {
++    localStorage.setItem(sceneKey(userId), JSON.stringify(elements));
++  } catch {
++    /* joy yetmasa yoki bloklangan bo'lsa, jim o'tamiz */
++  }
++}
++
++function openDb(): Promise<IDBDatabase> {
++  return new Promise((resolve, reject) => {
++    const req = indexedDB.open(DB_NAME, 1);
++    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
++    req.onsuccess = () => resolve(req.result);
++    req.onerror = () => reject(req.error);
++  });
++}
++
++async function withStore<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
++  const db = await openDb();
++  try {
++    return await new Promise<T>((resolve, reject) => {
++      const tx = db.transaction(STORE, mode);
++      const req = fn(tx.objectStore(STORE));
++      tx.oncomplete = () => resolve(req.result);
++      tx.onerror = tx.onabort = () => reject(tx.error);
++    });
++  } finally {
++    db.close();
++  }
++}
++
++/** Chizmadagi rasmlar (fileId -> dataURL). Xato bo'lsa bo'sh. */
++export async function loadFiles(userId: string): Promise<BinaryFiles> {
++  try {
++    return ((await withStore("readonly", (s) => s.get(userId))) as BinaryFiles | undefined) ?? {};
++  } catch {
++    return {};
++  }
++}
++
++export async function saveFiles(userId: string, files: BinaryFiles) {
++  try {
++    await withStore("readwrite", (s) => s.put(files, userId));
++  } catch {
++    /* saqlab bo'lmasa, rasmlar faqat shu sessiyada qoladi */
++  }
++}
++
++/** Chiqishda: barcha foydalanuvchilarning canvas ma'lumotlari o'chiriladi. */
++export function clearCanvasData() {
++  try {
++    for (const key of Object.keys(localStorage)) if (key.startsWith(PREFIX)) localStorage.removeItem(key);
++  } catch {
++    /* e'tiborsiz */
++  }
++  try {
++    indexedDB.deleteDatabase(DB_NAME);
++  } catch {
++    /* e'tiborsiz */
++  }
++}
+diff --git a/frontend/src/lib/chatApi.ts b/frontend/src/lib/chatApi.ts
+index fb61b28..db24ff8 100644
+--- a/frontend/src/lib/chatApi.ts
++++ b/frontend/src/lib/chatApi.ts
+@@ -1,5 +1,5 @@
+ /** Chat API chaqiruvlari va SSE oqimini o'qish. */
+-import { apiFetch, request } from "@/lib/api";
++import { apiFetch, request, RequestError } from "@/lib/api";
+ 
+ export type ModelInfo = {
+   id: string;
+@@ -13,15 +13,79 @@ export type ModelInfo = {
+   free?: boolean;
+ };
+ export type Conversation = { id: string; title: string; updated_at: string };
+-export type ChatMessage = { id: string; role: "user" | "assistant"; content: string; model: string | null; has_canvas?: boolean; route?: string };
++/** Auto rejim tanlovi: model nomi va sabab turi (`kind` UI da tarjima qilinadi, `reason` — eski serverlar uchun). */
++export type RouteInfo = { label: string; kind?: string; reason?: string };
++export type ChatMessage = {
++  id: string;
++  role: "user" | "assistant";
++  content: string;
++  model: string | null;
++  has_canvas?: boolean;
++  route?: RouteInfo;
++};
++
++/** Suhbatlar ro'yxatining bir sahifasi. */
++export const PAGE_SIZE = 50;
++/** Server yangi suhbatga beradigan standart sarlavha (UI uni tarjima qilib ko'rsatadi). */
++export const DEFAULT_TITLE = "New chat";
++
++/** Ulanish xatosi: so'rov serverga yetmadi (`sent=false`) yoki javob oqimi yarim yo'lda uzildi (`sent=true`). */
++export class ConnectionError extends Error {
++  constructor(readonly sent: boolean) {
++    super(sent ? "connection lost" : "offline");
++    this.name = "ConnectionError";
++  }
++}
+ 
+-export const getModels = () => apiFetch<ModelInfo[]>("/models");
+-export const getConversations = () => apiFetch<Conversation[]>("/conversations");
+-export const createConversation = () => apiFetch<Conversation>("/conversations", { method: "POST" });
+-export const getMessages = (id: string) => apiFetch<ChatMessage[]>(`/conversations/${id}/messages`);
+-export const deleteConversation = (id: string) => apiFetch<void>(`/conversations/${id}`, { method: "DELETE" });
++/** Server oqim ichida xato yubordi. `userMessageRemoved` — javob matni yo'q edi, server savolni tarixdan o'chirdi. */
++export class StreamError extends Error {
++  constructor(
++    message: string,
++    readonly userMessageRemoved = false,
++  ) {
++    super(message);
++    this.name = "StreamError";
++  }
++}
++
++/** Tarmoq xatosini ConnectionError ga aylantiradi; server javobi (RequestError) va bekor qilish o'zgarishsiz o'tadi. */
++function connError(e: unknown, sent: boolean): unknown {
++  if (e instanceof RequestError || (e as Error)?.name === "AbortError") return e;
++  return new ConnectionError(sent);
++}
+ 
+-/** Javobni bo'lak-bo'lak o'qiydi. Xato bo'lsa Error tashlaydi. */
++async function call<T>(p: Promise<T>): Promise<T> {
++  try {
++    return await p;
++  } catch (e) {
++    throw connError(e, false);
++  }
++}
++
++export const getModels = () => call(apiFetch<ModelInfo[]>("/models"));
++
++/** Suhbatlar: `q` — sarlavha bo'yicha qidiruv, `after` — shu suhbatdan keyingi (eskiroq) sahifa. */
++export function getConversations({ q, after, limit = PAGE_SIZE }: { q?: string; after?: Conversation; limit?: number } = {}) {
++  const params = new URLSearchParams({ limit: String(limit) });
++  if (q?.trim()) params.set("q", q.trim());
++  if (after) {
++    // (vaqt, id) kursori: vaqti bir xil suhbatlar sahifa chegarasida tushib qolmaydi (eski server before_id ni e'tiborsiz qoldiradi)
++    params.set("before", after.updated_at);
++    params.set("before_id", after.id);
++  }
++  return call(apiFetch<Conversation[]>(`/conversations?${params}`));
++}
++export const createConversation = () => call(apiFetch<Conversation>("/conversations", { method: "POST" }));
++export const renameConversation = (id: string, title: string) =>
++  call(apiFetch<Conversation>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }));
++export const getMessages = (id: string) => call(apiFetch<ChatMessage[]>(`/conversations/${id}/messages`));
++export const deleteConversation = (id: string) => call(apiFetch<void>(`/conversations/${id}`, { method: "DELETE" }));
++
++/**
++ * Javobni bo'lak-bo'lak o'qiydi.
++ * Xatolar: RequestError — server so'rovni boshidanoq rad etdi (xabar saqlanmagan); StreamError — oqim ichidagi xato;
++ * ConnectionError — tarmoq uzildi; AbortError — foydalanuvchi to'xtatdi.
++ */
+ export async function streamMessage(
+   convId: string,
+   content: string,
+@@ -29,31 +93,44 @@ export async function streamMessage(
+   image: string | null,
+   onDelta: (text: string) => void,
+   signal?: AbortSignal,
+-  onRoute?: (model: string, label: string, reason: string) => void,
++  onRoute?: (model: string, route: RouteInfo) => void,
+ ): Promise<void> {
+-  // Server xatosi (kalit yo'q va h.k.) bo'lsa RequestError tashlanadi: xabar saqlanmagan bo'ladi
+-  const res = await request(`/conversations/${convId}/messages`, {
+-    method: "POST",
+-    headers: { "Content-Type": "application/json" },
+-    body: JSON.stringify({ content, model, image }),
+-    signal,
+-  });
+-  if (!res.body) throw new Error("Bo'sh javob oqimi");
++  let res: Response;
++  try {
++    res = await request(`/conversations/${convId}/messages`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ content, model, image }),
++      signal,
++    });
++  } catch (e) {
++    throw connError(e, false);
++  }
++  if (!res.body) throw new ConnectionError(true);
+   const reader = res.body.getReader();
+   const decoder = new TextDecoder();
+   let buffer = "";
+   for (;;) {
+-    const { done, value } = await reader.read();
+-    if (done) break;
+-    buffer += decoder.decode(value, { stream: true });
++    let chunk: ReadableStreamReadResult<Uint8Array>;
++    try {
++      chunk = await reader.read();
++    } catch (e) {
++      // Chromium: "network error" (ERR_INCOMPLETE_CHUNKED_ENCODING) — ulanish yarim yo'lda uzildi
++      throw connError(e, true);
++    }
++    if (chunk.done) break;
++    buffer += decoder.decode(chunk.value, { stream: true });
+     const events = buffer.split("\n\n");
+     buffer = events.pop() ?? "";
+     for (const ev of events) {
+       if (!ev.startsWith("data:")) continue;
+       const data = JSON.parse(ev.slice(5));
+       if (data.type === "delta") onDelta(data.text);
+-      else if (data.type === "route") onRoute?.(data.model, data.label, data.reason);
+-      else if (data.type === "error") throw new Error(data.message);
++      else if (data.type === "route") onRoute?.(data.model, { label: data.label, kind: data.kind, reason: data.reason });
++      else if (data.type === "error") throw new StreamError(data.message, !!data.user_message_removed);
++      else if (data.type === "done") return;
+     }
+   }
++  // Oqim "done" yoki "error" siz tugadi: ulanish yarim yo'lda uzilgan
++  throw new ConnectionError(true);
+ }
+diff --git a/frontend/src/lib/codeBlocks.ts b/frontend/src/lib/codeBlocks.ts
+index eefd437..6cba115 100644
+--- a/frontend/src/lib/codeBlocks.ts
++++ b/frontend/src/lib/codeBlocks.ts
+@@ -32,12 +32,14 @@ export function latestWebCode(messages: ChatMessage[]): WebCode | null {
+ 
+ /** html/css/js dan iframe `srcDoc` yig'adi. */
+ export function buildSrcDoc({ html, css, js }: WebCode): string {
+-  const style = css ? `<style>${css}</style>` : "";
+-  const script = js ? `<script>${js}<\/script>` : "";
++  // Kod ichidagi "</script" / "</style" tegni erta yopib qo'ymasin (JS satrida "<\/" — o'sha "</")
++  const style = css ? `<style>${css.replace(/<\/(style)/gi, "<\\/$1")}</style>` : "";
++  const script = js ? `<script>${js.replace(/<\/(script)/gi, "<\\/$1")}<\/script>` : "";
+   if (/<html[\s>]|<!doctype/i.test(html)) {
+     let doc = html;
+-    if (style) doc = /<\/head>/i.test(doc) ? doc.replace(/<\/head>/i, `${style}</head>`) : style + doc;
+-    if (script) doc = /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, `${script}</body>`) : doc + script;
++    // Funksiya bilan almashtiramiz: kod ichidagi "$&", "$'" kabi ketma-ketliklar naqsh sifatida talqin qilinmasin
++    if (style) doc = /<\/head>/i.test(doc) ? doc.replace(/<\/head>/i, () => `${style}</head>`) : style + doc;
++    if (script) doc = /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, () => `${script}</body>`) : doc + script;
+     return doc;
+   }
+   return `<!doctype html><html><head><meta charset="utf-8">${style}</head><body>${html}${script}</body></html>`;
+diff --git a/frontend/src/lib/i18n.tsx b/frontend/src/lib/i18n.tsx
+index 4cce98b..f8193e5 100644
+--- a/frontend/src/lib/i18n.tsx
++++ b/frontend/src/lib/i18n.tsx
+@@ -97,6 +97,20 @@ const uz = {
+   "chat.noVision": "rasmni ko‘ra olmaydi. Claude yoki Gemini ni tanlang.", "chat.send": "Yuborish", "chat.stop": "To‘xtatish",
+   "chat.thinking.1": "javob tayyorlamoqda", "chat.thinking.2": "chuqur o‘ylayapti", "chat.thinking.3": "katta javob yozmoqda, biroz sabr",
+   "chat.preview": "Preview", "chat.canvas": "Canvas", "chat.togglePanel": "Panelni ochish/yopish",
++  // chat-ui
++  "nav.openMenu": "Menyuni ochish", "nav.menu": "Asosiy menyu",
++  "chat.conversations": "Suhbatlar", "chat.search": "Suhbatlarni qidirish…", "chat.noResults": "Hech narsa topilmadi",
++  "chat.noChats": "Hali suhbatlar yo‘q", "chat.loadMore": "Yana yuklash", "chat.rename": "Nomini o‘zgartirish",
++  "chat.deleteConfirm": "Suhbat o‘chirilsinmi?", "chat.copy": "Nusxa olish", "chat.copied": "Nusxa olindi", "chat.copyCode": "Kodni nusxalash",
++  "chat.loadImage": "Rasmni yuklash ({host})", "chat.closePanel": "Panelni yopish",
++  "chat.offline": "Internet aloqasi yo‘q yoki server javob bermayapti. Xabar yuborilmadi — qayta urinib ko‘ring.",
++  "chat.connectionLost": "Ulanish uzilib qoldi, javob to‘liq kelmadi. Qayta urinib ko‘ring.",
++  "chat.convGone": "Bu suhbat o‘chirilgan. Yangi suhbat ochildi.",
++  "auto.kind.image": "rasm chizish", "auto.kind.vision": "rasmni tushunish", "auto.kind.code": "kod",
++  "auto.kind.reasoning": "murakkab mantiq", "auto.kind.general": "umumiy savol",
++  "preview.iframeTitle": "Jonli ko‘rinish",
++  "voice.noMic": "Mikrofon topilmadi. Mikrofon ulanganini tekshiring.",
++  "voice.micError": "Mikrofonni ishga tushirib bo‘lmadi. U boshqa ilovada band bo‘lishi mumkin.",
+   "preview.empty": "AI HTML/CSS/JS kod yozganda, natija shu yerda avtomatik ko‘rinadi.", "preview.example": "Masalan: “oddiy kalkulyator sahifasini yoz”.",
+   "preview.writing": "AI yozmoqda… tugagach natija yangilanadi", "preview.rerun": "Qayta ishga tushirish", "canvas.loading": "Canvas yuklanmoqda…",
+   // ovoz
+@@ -248,6 +262,20 @@ const en: Dict = {
+   "chat.canvasEmpty": "The canvas is empty or not opened, so no image was attached.", "chat.noVision": "can't see images. Choose Claude or Gemini.",
+   "chat.send": "Send", "chat.stop": "Stop", "chat.thinking.1": "is preparing a reply", "chat.thinking.2": "is thinking deeply", "chat.thinking.3": "is writing a long reply, hang on",
+   "chat.togglePanel": "Toggle panel", "preview.empty": "When AI writes HTML/CSS/JS, the result appears here automatically.",
++  // chat-ui
++  "nav.openMenu": "Open menu", "nav.menu": "Main menu", "chat.preview": "Preview", "chat.canvas": "Canvas",
++  "chat.conversations": "Chats", "chat.search": "Search chats…", "chat.noResults": "Nothing found",
++  "chat.noChats": "No chats yet", "chat.loadMore": "Load more", "chat.rename": "Rename",
++  "chat.deleteConfirm": "Delete this chat?", "chat.copy": "Copy", "chat.copied": "Copied", "chat.copyCode": "Copy code",
++  "chat.loadImage": "Load image ({host})", "chat.closePanel": "Close panel",
++  "chat.offline": "No internet connection or the server is not responding. The message was not sent — try again.",
++  "chat.connectionLost": "The connection was lost and the reply is incomplete. Try again.",
++  "chat.convGone": "This chat was deleted. A new chat has been opened.",
++  "auto.kind.image": "image generation", "auto.kind.vision": "image understanding", "auto.kind.code": "code",
++  "auto.kind.reasoning": "complex reasoning", "auto.kind.general": "general question",
++  "preview.iframeTitle": "Live preview",
++  "voice.noMic": "No microphone found. Check that a microphone is connected.",
++  "voice.micError": "Could not start the microphone. It may be in use by another app.",
+   "preview.example": "E.g. “write a simple calculator page”.", "preview.writing": "AI is writing… the result updates when done", "preview.rerun": "Re-run",
+   "canvas.loading": "Loading canvas…", "voice.button": "Voice message", "voice.cancel": "Cancel", "voice.finish": "Finish",
+   "voice.denied": "Microphone access denied. Enable it in browser settings.", "voice.noSpeech": "No speech detected. Try speaking closer to the mic.",
+@@ -387,6 +415,20 @@ const ru: Dict = {
+   "chat.noVision": "не видит изображения. Выберите Claude или Gemini.", "chat.send": "Отправить", "chat.stop": "Остановить",
+   "chat.thinking.1": "готовит ответ", "chat.thinking.2": "глубоко думает", "chat.thinking.3": "пишет большой ответ, немного терпения",
+   "chat.togglePanel": "Показать/скрыть панель", "preview.empty": "Когда ИИ напишет HTML/CSS/JS, результат появится здесь.",
++  // chat-ui
++  "nav.openMenu": "Открыть меню", "nav.menu": "Главное меню", "chat.preview": "Превью", "chat.canvas": "Холст",
++  "chat.conversations": "Чаты", "chat.search": "Поиск чатов…", "chat.noResults": "Ничего не найдено",
++  "chat.noChats": "Чатов пока нет", "chat.loadMore": "Загрузить ещё", "chat.rename": "Переименовать",
++  "chat.deleteConfirm": "Удалить этот чат?", "chat.copy": "Копировать", "chat.copied": "Скопировано", "chat.copyCode": "Копировать код",
++  "chat.loadImage": "Загрузить изображение ({host})", "chat.closePanel": "Закрыть панель",
++  "chat.offline": "Нет подключения к интернету или сервер не отвечает. Сообщение не отправлено — попробуйте ещё раз.",
++  "chat.connectionLost": "Соединение прервалось, ответ получен не полностью. Попробуйте ещё раз.",
++  "chat.convGone": "Этот чат был удалён. Открыт новый чат.",
++  "auto.kind.image": "генерация изображения", "auto.kind.vision": "понимание изображения", "auto.kind.code": "код",
++  "auto.kind.reasoning": "сложная логика", "auto.kind.general": "общий вопрос",
++  "preview.iframeTitle": "Живой предпросмотр",
++  "voice.noMic": "Микрофон не найден. Проверьте, что он подключён.",
++  "voice.micError": "Не удалось включить микрофон. Возможно, он занят другим приложением.",
+   "preview.example": "Например: «напиши простую страницу калькулятора».", "preview.writing": "ИИ пишет… результат обновится после завершения",
+   "preview.rerun": "Перезапустить", "canvas.loading": "Загрузка холста…", "voice.button": "Голосовое сообщение", "voice.cancel": "Отмена", "voice.finish": "Готово",
+   "voice.denied": "Нет доступа к микрофону. Разрешите его в настройках браузера.", "voice.noSpeech": "Речь не распознана. Говорите ближе к микрофону.",

@@ -3,6 +3,12 @@
 > Bu fayl har bir yangi Claude Code chatida avtomatik o'qiladi. Loyiha egasi: **Umar** (GitHub: UmarIbnHattob).
 > Yangi chatda ishni shu yerdan davom ettiring.
 
+## ⚠️ DAVOM ETTIRISH (ochiq ish bor)
+
+Oldingi sessiya limit tufayli to'xtadi. **Avval `handoff/HANDOFF.md` ni to'liq o'qing** — u yerda nima qilingani,
+nima qolgani (chat-ui va settings-ui tuzatishlari, review, yakuniy E2E sinov), sinov muhiti (`tools/e2e/`) va
+saboqlar yozilgan. Ish tugagach bu bo'limni o'chiring.
+
 ## Foydalanuvchi bilan ishlash qoidalari (MUHIM)
 
 - **Barcha izohlar va javoblar o'zbek tilida** (lotin). Kod, fayl nomlari, commit xabarlari — ingliz tilida.

@@ -1,0 +1,194 @@
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index 675d354..2178a3c 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -1,21 +1,82 @@
+ /** Backend API manzili va umumiy fetch yordamchisi. */
++import { translate, type Lang, type TKey } from "@/lib/i18n";
++
+ export const API_URL =
+   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+ 
+-/** Server javob bergan, lekin so'rov bajarilmagan xato (4xx/5xx). */
+-export class RequestError extends Error {}
++/** Server javob bergan, lekin so'rov bajarilmagan xato (4xx/5xx). `status` — HTTP holat kodi. */
++export class RequestError extends Error {
++  constructor(
++    message: string,
++    readonly status = 0,
++  ) {
++    super(message);
++  }
++}
++
++/**
++ * Joriy interfeys tili. api.ts React komponenti emas, shuning uchun tilni i18n saqlagan joydan o'qiymiz:
++ * avval brauzer xotirasi (I18nProvider tanlovni shu yerga yozadi), keyin <html lang>.
++ */
++function currentLang(): Lang {
++  const ok = (l: string | null | undefined): l is Lang => l === "uz" || l === "en" || l === "ru";
++  try {
++    const saved = localStorage.getItem("omniai-lang");
++    if (ok(saved)) return saved;
++  } catch {
++    /* e'tiborsiz */
++  }
++  const html = typeof document !== "undefined" ? document.documentElement.lang : null;
++  return ok(html) ? html : "uz";
++}
+ 
+-export const NETWORK_ERROR = "Backend bilan aloqa yo‘q. Server (uvicorn) ishlayotganini tekshiring.";
++const tr = (key: TKey, vars?: Record<string, string | number>) => translate(currentLang(), key, vars);
++
++/** Tarmoq xatosi matni (foydalanuvchi uchun, joriy tilda). */
++export const networkErrorText = () => tr("err.network");
++
++// Pydantic maydon nomlari -> foydalanuvchiga tushunarli nom
++const FIELDS: Record<string, TKey> = {
++  key: "field.key", api_key: "field.key", content: "field.content", question: "field.content", prompt: "field.prompt",
++  name: "field.name", title: "field.title", password: "field.password", current_password: "field.password",
++  new_password: "field.password", display_name: "field.displayName", nickname: "field.nickname", email: "field.email",
++  base_url: "field.baseUrl", folder: "field.folder", messages: "field.messages",
++};
++
++type PydanticError = { type?: string; loc?: (string | number)[]; msg?: string; ctx?: Record<string, unknown> };
++
++/** FastAPI 422 tafsiloti (ro'yxat) -> o'qiladigan, tarjima qilingan xabar ("API kalit: kamida 8 belgi…"). */
++function validationText(errors: PydanticError[]): string {
++  const lines = errors.slice(0, 3).map((e) => {
++    const name = [...(e.loc ?? [])].reverse().find((x): x is string => typeof x === "string" && x !== "body");
++    const field = name ? (FIELDS[name] ? tr(FIELDS[name]) : name) : tr("field.value");
++    const n = Number(e.ctx?.min_length ?? e.ctx?.max_length ?? 0);
++    switch (e.type) {
++      case "string_too_short":
++        return n <= 1 ? tr("err.missing", { field }) : tr("err.tooShort", { field, n });
++      case "string_too_long":
++        return tr("err.tooLong", { field, n });
++      case "too_long":
++        return tr("err.tooMany", { field, n });
++      case "missing":
++        return tr("err.missing", { field });
++      default:
++        return tr("err.invalid", { field });
++    }
++  });
++  return [...new Set(lines)].join(" ");
++}
+ 
+ /** fetch ni chaqiradi; tarmoq xatosini va server `detail` xabarini tushunarli Error ga aylantiradi. */
+ export async function request(path: string, init?: RequestInit): Promise<Response> {
+   let res: Response;
+   try {
+-    // credentials: "include" — sessiya cookie'si backendga yuboriladi
+-    res = await fetch(`${API_URL}${path}`, { credentials: "include", ...init });
++    // credentials: "include" — sessiya cookie'si backendga yuboriladi; no-store — chiqqandan keyin
++    // "Orqaga" bosilganda oldingi foydalanuvchi ma'lumoti brauzer keshidan ko'rinmasin
++    res = await fetch(`${API_URL}${path}`, { credentials: "include", cache: "no-store", ...init });
+   } catch (e) {
+     if ((e as Error).name === "AbortError") throw e;
+-    throw new Error(NETWORK_ERROR);
++    throw new Error(networkErrorText());
+   }
+   if (res.status === 401) {
+     // Sessiya tugagan: AuthGate eshitib, kirish sahifasiga o'tkazadi
+@@ -23,8 +84,13 @@ export async function request(path: string, init?: RequestInit): Promise<Respons
+   }
+   if (!res.ok) {
+     const data = await res.json().catch(() => null);
+-    const detail = typeof data?.detail === "string" ? data.detail : `Server xatosi (${res.status})`;
+-    throw new RequestError(detail);
++    const detail =
++      typeof data?.detail === "string"
++        ? data.detail
++        : Array.isArray(data?.detail) && data.detail.length
++          ? validationText(data.detail)
++          : tr("err.server", { n: res.status });
++    throw new RequestError(detail, res.status);
+   }
+   return res;
+ }
+diff --git a/frontend/src/lib/date.ts b/frontend/src/lib/date.ts
+new file mode 100644
+index 0000000..0b0690c
+--- /dev/null
++++ b/frontend/src/lib/date.ts
+@@ -0,0 +1,42 @@
++/**
++ * Sanalarni interfeys tilida yozish.
++ * Chromium (va Electron) ICU ma'lumotlarida o'zbekcha oy nomlari yo'q: toLocaleDateString("uz-Latn") "2026 M10 10"
++ * qaytaradi. Shuning uchun o'zbekcha sanani o'zimiz yig'amiz (CLDR shakli: "10-oktabr, 2026", "10-okt").
++ */
++import type { Lang } from "@/lib/i18n";
++
++const UZ_MONTHS = ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr"];
++const UZ_MONTHS_SHORT = ["yan", "fev", "mar", "apr", "may", "iyn", "iyl", "avg", "sen", "okt", "noy", "dek"];
++
++/**
++ * long  — "10-oktabr, 2026" / "October 10, 2026" / "10 октября 2026 г."
++ * short — "10-okt" / "Oct 10" / "10 окт."
++ * month — "oktabr, 2026" / "October 2026" / "октябрь 2026 г."
++ */
++export type DateStyle = "long" | "short" | "month";
++
++const OPTIONS: Record<DateStyle, Intl.DateTimeFormatOptions> = {
++  long: { day: "numeric", month: "long", year: "numeric" },
++  short: { day: "numeric", month: "short" },
++  month: { month: "long", year: "numeric" },
++};
++
++/** Sana obyekti yoki ISO satr ("2026-10-10", "2026-10-10T08:00:00Z", "2026-10"). Faqat sana bo'lsa — mahalliy kun. */
++function toDate(d: Date | string): Date {
++  if (d instanceof Date) return d;
++  if (/^\d{4}-\d{2}$/.test(d)) return new Date(`${d}-01T00:00:00`);
++  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return new Date(`${d}T00:00:00`);
++  return new Date(d);
++}
++
++export function formatDate(value: Date | string, lang: Lang, style: DateStyle = "long"): string {
++  const d = toDate(value);
++  if (Number.isNaN(d.getTime())) return String(value);
++  if (lang === "uz") {
++    const day = d.getDate(), m = d.getMonth(), y = d.getFullYear();
++    if (style === "short") return `${day}-${UZ_MONTHS_SHORT[m]}`;
++    if (style === "month") return `${UZ_MONTHS[m]}, ${y}`;
++    return `${day}-${UZ_MONTHS[m]}, ${y}`;
++  }
++  return d.toLocaleDateString(lang, OPTIONS[style]);
++}
+diff --git a/frontend/src/lib/me.ts b/frontend/src/lib/me.ts
+index 04a09c2..c11129b 100644
+--- a/frontend/src/lib/me.ts
++++ b/frontend/src/lib/me.ts
+@@ -29,11 +29,19 @@ export type MePatch = { display_name?: string | null; nickname?: string | null;
+ 
+ /** Kirmagan bo'lsa null (401 hodisasini yubormaydi). */
+ export async function fetchMe(): Promise<Me | null> {
+-  const res = await fetch(`${API_URL}/me`, { credentials: "include" });
++  const res = await fetch(`${API_URL}/me`, { credentials: "include", cache: "no-store" });
+   return res.ok ? res.json() : null;
+ }
+ export const patchMe = (body: MePatch) => apiFetch<Me>("/me", { method: "PATCH", body: JSON.stringify(body) });
+ 
++/** So'zning birinchi "harfi": emoji/bayroq kabi bir nechta kod birligidan iborat belgi ham butunligicha olinadi. */
++function firstChar(word: string): string {
++  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
++    for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(word)) return segment;
++  }
++  return Array.from(word)[0] ?? "";
++}
++
+ /** Avatar harflari: ismdan ikki harf ("Umar Ibn" -> "UI"), ism bo'lmasa emailning birinchi harfi. */
+ export const initials = (me: Pick<Me, "display_name" | "email">) =>
+   me.display_name?.trim()
+@@ -41,9 +49,9 @@ export const initials = (me: Pick<Me, "display_name" | "email">) =>
+         .trim()
+         .split(/\s+/)
+         .slice(0, 2)
+-        .map((w) => w[0]!.toUpperCase())
++        .map((w) => firstChar(w).toUpperCase())
+         .join("")
+-    : me.email[0]!.toUpperCase();
++    : firstChar(me.email).toUpperCase();
+ 
+ export const API_KEY_LINKS: Record<Provider, { label: string; url: string }> = {
+   anthropic: { label: "Claude (Anthropic Console)", url: "https://console.anthropic.com/settings/keys" },
