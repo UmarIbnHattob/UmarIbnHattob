@@ -128,6 +128,18 @@ async def test_custom_provider_calls_use_guard_only_without_allow_local(monkeypa
             await coro
 
 
+@pytest.mark.anyio
+async def test_guarded_client_ignores_proxy_env(monkeypatch):
+    """HTTPS_PROXY bo'lsa ham himoyalangan mijoz proksi orqali ulanmaydi (aks holda manzilni proksi resolve qilardi).
+    httpx o'zi transport berilganda muhit proksilarini e'tiborsiz qoldiradi; test kutubxona o'zgarsa ushlaydi."""
+    monkeypatch.setattr(settings, "allow_local_providers", False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example.com:3128")
+    async with netguard.http_client(httpx.Timeout(5)) as c:
+        assert all(t is None for t in c._mounts.values())  # proksi transporti o'rnatilmagan
+        assert isinstance(c._transport_for_url(httpx.URL("https://api.example.com/v1")), netguard.GuardedTransport)
+
+
 def test_dns_rebinding_after_request_time_check_is_blocked(client, monkeypatch):
     """So'rovdan oldingi tekshiruv tashqi manzilni ko'radi, ulanish paytida esa DNS ichki manzil qaytaradi."""
     monkeypatch.setattr(settings, "allow_local_providers", False)
