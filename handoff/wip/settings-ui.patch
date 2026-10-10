@@ -1,5 +1,124 @@
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 95e087a..16091ca 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -9,6 +9,9 @@
+   --n-800: 38 38 38; --n-900: 23 23 23; --n-950: 10 10 10;
+   /* Provayder ranglari — qorong'i fon uchun tekshirilgan qadamlar */
+   --p-anthropic: #d95926; --p-deepseek: #3987e5; --p-gemini: #199e70;
++  /* Grafikdagi qo'shimcha qatorlar (Whisper, OpenRouter, Groq…): provayder ranglari bilan birga
++     rang-ko'rlik (qo'shni juftlar) va fonga ≥3:1 kontrast tekshiruvidan o'tgan */
++  --s-1: #c98500; --s-2: #d55181; --s-3: #008300; --s-4: #9085e9; --s-5: #e66767;
+   color-scheme: dark;
+ }
+ 
+@@ -19,6 +22,7 @@
+   --n-800: 229 229 229; --n-900: 246 246 247; --n-950: 255 255 255;
+   /* Provayder ranglari — yorug' fon uchun */
+   --p-anthropic: #eb6834; --p-deepseek: #2a78d6; --p-gemini: #1baf7a;
++  --s-1: #b57800; --s-2: #d55181; --s-3: #008300; --s-4: #6250d6; --s-5: #e34948;
+   color-scheme: light;
+ }
+ 
+@@ -28,6 +32,19 @@
+ :root[data-theme="light"] .text-violet-400 { color: #7c3aed; }
+ :root[data-theme="light"] .hover\:text-violet-200:hover { color: #5b21b6; }
+ 
++/* Yorug' fonda holat ranglari (yashil/qizil/sariq matn) ham to'qroq: kichik matn uchun kontrast ≥ 4.5 */
++:root[data-theme="light"] .text-emerald-400 { color: #047857; }
++:root[data-theme="light"] .text-red-400,
++:root[data-theme="light"] .text-red-500,
++:root[data-theme="light"] .hover\:text-red-400:hover { color: #b91c1c; }
++:root[data-theme="light"] .text-amber-400,
++:root[data-theme="light"] .text-amber-500 { color: #b45309; }
++/* Yorug' mavzuda placeholder (standart och kulrang ~2.5:1 edi) */
++:root[data-theme="light"] ::placeholder { color: #6b6b6b; opacity: 1; }
++
++/* Qorong'i mavzuda kichik izoh matnlari (neutral-500, ~3.6:1) o'qilishi uchun neutral-400 */
++:root:not([data-theme="light"]) .text-neutral-500 { color: rgb(var(--n-400)); }
++
+ /* Shrift o'lchami (Sozlamalar > Umumiy) — butun interfeys masshtabi */
+ :root[data-font="sm"] { font-size: 14px; }
+ :root[data-font="lg"] { font-size: 17.5px; }
+@@ -44,13 +61,16 @@ body {
+ }
+ 
+ /* Markdown ko'rinishi (chat javoblari uchun) */
++/* Uzun bo'linmas satrlar (URL, xesh, base64) pufakchadan chiqib ketmaydi; kod bloklari o'z ichida suriladi */
++.markdown { overflow-wrap: anywhere; min-width: 0; }
+ .markdown > * + * { margin-top: 0.6rem; }
+ .markdown h1, .markdown h2, .markdown h3 { font-weight: 600; margin-top: 1rem; }
+ .markdown ul { list-style: disc; padding-left: 1.4rem; }
+ .markdown ol { list-style: decimal; padding-left: 1.4rem; }
+ .markdown a { color: #60a5fa; text-decoration: underline; }
++:root[data-theme="light"] .markdown a { color: #1d4ed8; }
+ .markdown code { background: rgb(var(--n-950)); border-radius: 4px; padding: 0.1rem 0.3rem; font-size: 0.85em; }
+-.markdown pre { color: #e6edf3; background: #0d1117; border-radius: 8px; padding: 0.75rem; overflow-x: auto; }
++.markdown pre { color: #e6edf3; background: #0d1117; border-radius: 8px; padding: 0.75rem; overflow-x: auto; overflow-wrap: normal; }
+ .markdown pre code { background: transparent; padding: 0; }
+ .markdown table { border-collapse: collapse; }
+ .markdown th, .markdown td { border: 1px solid rgb(var(--n-700)); padding: 0.3rem 0.6rem; }
+diff --git a/frontend/src/app/login/page.tsx b/frontend/src/app/login/page.tsx
+index 4a262ae..30723bc 100644
+--- a/frontend/src/app/login/page.tsx
++++ b/frontend/src/app/login/page.tsx
+@@ -3,10 +3,27 @@
+ import { useState } from "react";
+ import { Loader2 } from "lucide-react";
+ import * as authApi from "@/lib/authApi";
++import { RequestError } from "@/lib/api";
+ import { patchMe } from "@/lib/me";
+ import OrbitLogo from "@/components/OrbitLogo";
+ import { LANGS, useI18n } from "@/lib/i18n";
+ 
++/**
++ * Kirishdan keyin qaytiladigan manzil: `?next=` faqat shu saytning nisbiy yo'li bo'lsa ("/settings?tab=keys").
++ * "//boshqa.sayt", "/\boshqa.sayt", to'liq URL va /login ning o'zi rad etiladi (ochiq yo'naltirish bo'lmasin).
++ */
++function safeNext(): string {
++  const next = new URLSearchParams(window.location.search).get("next");
++  if (!next || !next.startsWith("/") || next.startsWith("//") || next.includes("\\")) return "/chat";
++  try {
++    const url = new URL(next, window.location.origin);
++    if (url.origin !== window.location.origin || url.pathname.startsWith("/login")) return "/chat";
++    return url.pathname + url.search + url.hash;
++  } catch {
++    return "/chat";
++  }
++}
++
+ /** Kirish / ro'yxatdan o'tish formasi. */
+ export default function LoginPage() {
+   const { t, lang, setLang } = useI18n();
+@@ -24,18 +41,19 @@ export default function LoginPage() {
+       await (mode === "login" ? authApi.login : authApi.register)(email.trim(), password);
+       // Yangi hisob: login sahifasida tanlangan tilni profilga yozamiz
+       if (mode === "register") await patchMe({ preferences: { language: lang } }).catch(() => {});
+-      // To'liq yuklash: AuthGate foydalanuvchini yangi cookie bilan qayta o'qiydi
+-      window.location.assign("/chat");
++      // To'liq yuklash: AuthGate foydalanuvchini yangi cookie bilan qayta o'qiydi.
++      // Kirishdan oldin ochilgan sahifaga (?next=) qaytamiz — faqat shu saytning ichki manzili bo'lsa
++      window.location.assign(safeNext());
+     } catch (err) {
+-      setError(friendly((err as Error).message));
++      setError(friendly(err as Error));
+       setBusy(false);
+     }
+   }
+ 
+-  // FastAPI tekshiruv xatolari (422) inglizcha keladi: tushunarli qilamiz
+-  function friendly(msg: string) {
+-    if (msg.includes("Server xatosi (422)")) return t("login.invalid");
+-    return msg;
++  // FastAPI tekshiruv xatolari (422): email yoki parol formati noto'g'ri
++  function friendly(err: Error) {
++    if (err instanceof RequestError && err.status === 422) return t("login.invalid");
++    return err.message;
+   }
+ 
+   return (
 diff --git a/frontend/src/app/media/page.tsx b/frontend/src/app/media/page.tsx
-index a3b14bc..2ef1630 100644
+index a3b14bc..42d274c 100644
 --- a/frontend/src/app/media/page.tsx
 +++ b/frontend/src/app/media/page.tsx
 @@ -1,30 +1,52 @@
@@ -156,7 +275,7 @@ index a3b14bc..2ef1630 100644
              value={model}
              onChange={(e) => setModel(e.target.value)}
 -            className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm"
-+            aria-label={t("settings.defaultModel")}
++            aria-label={t("media.model")}
 +            className="min-w-0 max-w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm"
            >
              {models.map((m) => (
@@ -323,6 +442,41 @@ index a3b14bc..2ef1630 100644
      </div>
    );
  }
+diff --git a/frontend/src/app/not-found.tsx b/frontend/src/app/not-found.tsx
+new file mode 100644
+index 0000000..6535a9f
+--- /dev/null
++++ b/frontend/src/app/not-found.tsx
+@@ -0,0 +1,29 @@
++"use client";
++
++import { useEffect } from "react";
++import Link from "next/link";
++import { MessageSquare } from "lucide-react";
++import { useI18n } from "@/lib/i18n";
++
++/** 404: noma'lum manzil — ilova ichida, joriy tilda, chatga qaytish havolasi bilan. */
++export default function NotFound() {
++  const { t } = useI18n();
++  useEffect(() => {
++    document.title = `${t("notFound.title")} — OmniAI`;
++  }, [t]);
++  return (
++    <div className="flex min-h-full items-center justify-center p-6">
++      <div className="msg-in max-w-md text-center">
++        <p className="bg-gradient-to-br from-violet-400 to-blue-500 bg-clip-text text-7xl font-bold tabular-nums text-transparent">404</p>
++        <h1 className="mt-4 text-xl font-semibold">{t("notFound.title")}</h1>
++        <p className="mt-2 text-sm text-neutral-400">{t("notFound.text")}</p>
++        <Link
++          href="/chat"
++          className="mt-6 inline-flex items-center gap-2 rounded-md bg-violet-600 px-4 py-2 text-sm text-white transition hover:bg-violet-500"
++        >
++          <MessageSquare size={16} /> {t("notFound.back")}
++        </Link>
++      </div>
++    </div>
++  );
++}
 diff --git a/frontend/src/app/settings/page.tsx b/frontend/src/app/settings/page.tsx
 index 2a4e3b3..d044c35 100644
 --- a/frontend/src/app/settings/page.tsx
@@ -2602,7 +2756,7 @@ index 0000000..0b0690c
 +  return d.toLocaleDateString(lang, OPTIONS[style]);
 +}
 diff --git a/frontend/src/lib/i18n.tsx b/frontend/src/lib/i18n.tsx
-index 4cce98b..37c9eab 100644
+index 4cce98b..4860d52 100644
 --- a/frontend/src/lib/i18n.tsx
 +++ b/frontend/src/lib/i18n.tsx
 @@ -11,6 +11,39 @@ export const LANGS: { id: Lang; label: string; flag: string }[] = [
@@ -2641,7 +2795,7 @@ index 4cce98b..37c9eab 100644
 +  "prov.freeN.one": "{n} ta bepul", "prov.freeN.few": "{n} ta bepul", "prov.freeN.many": "{n} ta bepul", "prov.freeN.other": "{n} ta bepul",
 +  "privacy.sessionExpired": "Sessiya tugagan. Qaytadan kiring.", "privacy.exported": "Fayl yuklab olindi",
 +  "media.loadMore": "Ko‘proq yuklash", "media.confirmDelete": "Rasm o‘chirilsinmi?", "media.deleted": "Rasm o‘chirildi",
-+  "media.view": "Rasmni kattalashtirish", "media.shortcut": "{mod}+Enter — yaratish",
++  "media.view": "Rasmni kattalashtirish", "media.shortcut": "{mod}+Enter — yaratish", "media.model": "Model",
    // umumiy
    "common.save": "Saqlash", "common.saved": "Saqlandi", "common.cancel": "Bekor qilish", "common.delete": "O‘chirish",
    "common.close": "Yopish", "common.loading": "Yuklanmoqda…", "common.soon": "Tez orada", "common.new": "Yangi",
@@ -2681,7 +2835,7 @@ index 4cce98b..37c9eab 100644
 +  "prov.freeN.one": "{n} free", "prov.freeN.other": "{n} free",
 +  "privacy.sessionExpired": "Your session has expired. Please sign in again.", "privacy.exported": "File downloaded",
 +  "media.loadMore": "Load more", "media.confirmDelete": "Delete this image?", "media.deleted": "Image deleted",
-+  "media.view": "View full size", "media.shortcut": "{mod}+Enter — generate",
++  "media.view": "View full size", "media.shortcut": "{mod}+Enter — generate", "media.model": "Model",
    "common.save": "Save", "common.saved": "Saved", "common.cancel": "Cancel", "common.delete": "Delete", "common.close": "Close",
    "common.loading": "Loading…", "common.soon": "Coming soon", "common.new": "New", "common.confirm": "Confirm", "common.on": "On", "common.off": "Off",
    "nav.chat": "Chat", "nav.agent": "Agent", "nav.media": "Media Studio", "nav.settings": "Settings",
@@ -2721,7 +2875,7 @@ index 4cce98b..37c9eab 100644
 +  "prov.freeN.one": "{n} бесплатная", "prov.freeN.few": "{n} бесплатные", "prov.freeN.many": "{n} бесплатных", "prov.freeN.other": "{n} бесплатных",
 +  "privacy.sessionExpired": "Сессия истекла. Войдите снова.", "privacy.exported": "Файл скачан",
 +  "media.loadMore": "Загрузить ещё", "media.confirmDelete": "Удалить изображение?", "media.deleted": "Изображение удалено",
-+  "media.view": "Открыть в полном размере", "media.shortcut": "{mod}+Enter — создать",
++  "media.view": "Открыть в полном размере", "media.shortcut": "{mod}+Enter — создать", "media.model": "Модель",
    "common.save": "Сохранить", "common.saved": "Сохранено", "common.cancel": "Отмена", "common.delete": "Удалить", "common.close": "Закрыть",
    "common.loading": "Загрузка…", "common.soon": "Скоро", "common.new": "Новое", "common.confirm": "Подтвердить", "common.on": "Вкл", "common.off": "Выкл",
    "nav.chat": "Чат", "nav.agent": "Агент", "nav.media": "Медиа-студия", "nav.settings": "Настройки",

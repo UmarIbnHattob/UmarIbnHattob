@@ -1527,7 +1527,7 @@ index 4df8c23..e2bd49e 100644
    );
  }
 diff --git a/frontend/src/components/VoiceButton.tsx b/frontend/src/components/VoiceButton.tsx
-index 4d52883..030e61a 100644
+index 4d52883..c5a228a 100644
 --- a/frontend/src/components/VoiceButton.tsx
 +++ b/frontend/src/components/VoiceButton.tsx
 @@ -4,11 +4,19 @@ import { useEffect, useRef, useState } from "react";
@@ -1696,7 +1696,7 @@ index 4d52883..030e61a 100644
 -        <span className="relative flex h-2.5 w-2.5">
 +      <div
 +        ref={widgetRef}
-+        className="msg-in flex min-w-0 max-w-[55%] shrink-0 items-center gap-1.5 rounded-md border border-violet-500/40 bg-neutral-950 px-2 sm:gap-2"
++        className="msg-in flex min-w-0 max-w-[50%] shrink-0 items-center gap-1.5 rounded-md border border-violet-500/40 bg-neutral-950 px-2"
 +      >
 +        <span className="relative flex h-2.5 w-2.5 shrink-0">
            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
@@ -1704,7 +1704,7 @@ index 4d52883..030e61a 100644
          </span>
 -        <canvas ref={canvasRef} width={120} height={32} className="h-8 w-[120px]" />
 -        <span className="w-10 font-mono text-xs tabular-nums text-neutral-400">
-+        <canvas ref={canvasRef} width={120} height={32} className="h-8 w-12 min-w-0 sm:w-[120px]" />
++        <canvas ref={canvasRef} width={80} height={32} className="h-8 w-14 min-w-0 sm:w-20" />
 +        <span className="w-9 shrink-0 font-mono text-xs tabular-nums text-neutral-400">
            {Math.floor(sec / 60)}:{String(sec % 60).padStart(2, "0")}
          </span>
