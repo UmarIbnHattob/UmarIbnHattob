@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import * as authApi from "@/lib/authApi";
+import { RequestError } from "@/lib/api";
 import { patchMe } from "@/lib/me";
+import { safeNextPath } from "@/lib/nav";
 import OrbitLogo from "@/components/OrbitLogo";
 import { LANGS, useI18n } from "@/lib/i18n";
 
@@ -24,18 +26,19 @@ export default function LoginPage() {
       await (mode === "login" ? authApi.login : authApi.register)(email.trim(), password);
       // Yangi hisob: login sahifasida tanlangan tilni profilga yozamiz
       if (mode === "register") await patchMe({ preferences: { language: lang } }).catch(() => {});
-      // To'liq yuklash: AuthGate foydalanuvchini yangi cookie bilan qayta o'qiydi
-      window.location.assign("/chat");
+      // To'liq yuklash: AuthGate foydalanuvchini yangi cookie bilan qayta o'qiydi.
+      // Kirishdan oldin ochilgan sahifaga (?next=) qaytamiz — faqat shu saytning ichki manzili bo'lsa
+      window.location.assign(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/chat");
     } catch (err) {
-      setError(friendly((err as Error).message));
+      setError(friendly(err as Error));
       setBusy(false);
     }
   }
 
-  // FastAPI tekshiruv xatolari (422) inglizcha keladi: tushunarli qilamiz
-  function friendly(msg: string) {
-    if (msg.includes("Server xatosi (422)")) return t("login.invalid");
-    return msg;
+  // FastAPI tekshiruv xatolari (422): email yoki parol formati noto'g'ri
+  function friendly(err: Error) {
+    if (err instanceof RequestError && err.status === 422) return t("login.invalid");
+    return err.message;
   }
 
   return (

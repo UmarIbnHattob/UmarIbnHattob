@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/components/AuthGate";
 import { btnCls, btnDangerCls, btnGhostCls, inputCls, Row, Section, useToast } from "@/components/settings/ui";
@@ -34,18 +35,16 @@ export default function AccountTab() {
     <>
       <Section title={t("settings.tab.account")}>
         <Row label={t("account.email")}>
-          <span className="text-sm text-neutral-300">{me.email}</span>
+          <span className="break-all text-sm text-neutral-300">{me.email}</span>
         </Row>
         <Row label={t("account.since")}>
-          <span className="text-sm text-neutral-300">
-            {new Date(me.created_at).toLocaleDateString(lang === "uz" ? "uz-Latn" : lang, { day: "numeric", month: "long", year: "numeric" })}
-          </span>
+          <span className="text-sm text-neutral-300">{formatDate(me.created_at, lang, "long")}</span>
         </Row>
       </Section>
 
       <Section title={t("account.password")}>
         <form
-          className="grid gap-3 p-4 sm:grid-cols-[1fr_1fr_auto]"
+          className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_auto]"
           onSubmit={async (e) => {
             e.preventDefault();
             const ok = await run(
@@ -60,7 +59,7 @@ export default function AccountTab() {
         >
           <input type="password" autoComplete="current-password" required placeholder={t("account.currentPassword")} className={inputCls} value={cur} onChange={(e) => setCur(e.target.value)} />
           <input type="password" autoComplete="new-password" required minLength={8} placeholder={t("account.newPassword")} className={inputCls} value={next} onChange={(e) => setNext(e.target.value)} />
-          <button className={btnCls} disabled={busy}>
+          <button className={`${btnCls} sm:col-span-2 sm:justify-self-end xl:col-span-1`} disabled={busy}>
             {t("common.save")}
           </button>
         </form>

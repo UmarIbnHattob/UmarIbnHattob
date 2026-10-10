@@ -29,10 +29,18 @@ export type MePatch = { display_name?: string | null; nickname?: string | null; 
 
 /** Kirmagan bo'lsa null (401 hodisasini yubormaydi). */
 export async function fetchMe(): Promise<Me | null> {
-  const res = await fetch(`${API_URL}/me`, { credentials: "include" });
+  const res = await fetch(`${API_URL}/me`, { credentials: "include", cache: "no-store" });
   return res.ok ? res.json() : null;
 }
 export const patchMe = (body: MePatch) => apiFetch<Me>("/me", { method: "PATCH", body: JSON.stringify(body) });
+
+/** So'zning birinchi "harfi": emoji/bayroq kabi bir nechta kod birligidan iborat belgi ham butunligicha olinadi. */
+function firstChar(word: string): string {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(word)) return segment;
+  }
+  return Array.from(word)[0] ?? "";
+}
 
 /** Avatar harflari: ismdan ikki harf ("Umar Ibn" -> "UI"), ism bo'lmasa emailning birinchi harfi. */
 export const initials = (me: Pick<Me, "display_name" | "email">) =>
@@ -41,9 +49,9 @@ export const initials = (me: Pick<Me, "display_name" | "email">) =>
         .trim()
         .split(/\s+/)
         .slice(0, 2)
-        .map((w) => w[0]!.toUpperCase())
+        .map((w) => firstChar(w).toUpperCase())
         .join("")
-    : me.email[0]!.toUpperCase();
+    : firstChar(me.email).toUpperCase();
 
 export const API_KEY_LINKS: Record<Provider, { label: string; url: string }> = {
   anthropic: { label: "Claude (Anthropic Console)", url: "https://console.anthropic.com/settings/keys" },

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
 import { useAuth } from "@/components/AuthGate";
+import ModelSelector, { type PickerModel } from "@/components/ModelSelector";
 import { apiFetch } from "@/lib/api";
 import { LANGS, useI18n } from "@/lib/i18n";
-import type { ModelInfo } from "@/lib/chatApi";
-import { colorOf } from "@/lib/providers";
 import { btnCls, inputCls, Row, Section, useToast } from "@/components/settings/ui";
 
 const MAX = 3000;
@@ -14,10 +15,10 @@ export default function AiTab() {
   const { me, updateMe } = useAuth();
   const { t } = useI18n();
   const toast = useToast();
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [models, setModels] = useState<PickerModel[]>([]);
   const [text, setText] = useState(me.preferences.custom_instructions);
   useEffect(() => {
-    apiFetch<ModelInfo[]>("/models").then(setModels).catch(() => {});
+    apiFetch<PickerModel[]>("/models").then(setModels).catch(() => {});
   }, []);
 
   const save = async (p: Parameters<typeof updateMe>[0]) => {
@@ -28,23 +29,54 @@ export default function AiTab() {
       toast((e as Error).message, false);
     }
   };
-  const current = me.preferences.default_model ?? models[0]?.id ?? "";
+
+  // Shaxsiy ko'rsatmalar: maydondan chiqilganda (boshqa bo'limga o'tganda ham) avtomatik saqlanadi,
+  // sahifa yopilayotganda/yangilanayotganda saqlanmagan matn bo'lsa brauzer ogohlantiradi
+  const saved = me.preferences.custom_instructions;
+  const dirty = text !== saved;
+  const latest = useRef({ text, dirty, save });
+  latest.current = { text, dirty, save };
+  const saveText = () => {
+    if (dirty) save({ preferences: { custom_instructions: text } });
+  };
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!latest.current.dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      const l = latest.current;
+      if (l.dirty) l.save({ preferences: { custom_instructions: l.text } });
+    };
+  }, []);
+
+  // Standart model: tanlanmagan (null) bo'lsa chat Auto bilan ochiladi — shu yerda ham Auto belgilanadi
+  const value = me.preferences.default_model ?? "auto";
+  const current = models.find((m) => m.id === value);
+  const pick = (id: string) => {
+    const next = id === "auto" ? null : id;
+    if (next !== me.preferences.default_model) save({ preferences: { default_model: next } });
+  };
 
   return (
     <>
       <Section title={t("settings.defaultModel")} desc={t("settings.defaultModelHint")}>
-        <div className="grid gap-2 p-3 sm:grid-cols-2">
-          {models.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => save({ preferences: { default_model: m.id } })}
-              className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition ${current === m.id ? "border-violet-500 bg-violet-500/10" : "border-neutral-800 hover:border-neutral-600"}`}
-            >
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colorOf(m.provider) }} />
-              <span className="flex-1">{m.label}</span>
-              {m.vision && <span className="text-[10px] uppercase tracking-wide text-neutral-500">vision</span>}
-            </button>
-          ))}
+        <div className="p-4">
+          <ModelSelector models={models} value={value} onChange={pick} />
+          {current?.available === false && (
+            <p className="mt-3 flex items-start gap-2 text-xs text-amber-400">
+              <AlertTriangle size={14} className="mt-px shrink-0" />
+              <span>
+                {current.unavailable_reason === "quota" ? t("model.quotaHint") : t("model.noKeyHint")}{" "}
+                <Link href="/settings?tab=keys" className="underline">
+                  {t("settings.tab.keys")}
+                </Link>
+              </span>
+            </p>
+          )}
         </div>
       </Section>
       <Section title={t("settings.responseLanguage")}>
@@ -65,14 +97,24 @@ export default function AiTab() {
       </Section>
       <Section title={t("settings.instructions")} desc={t("settings.instructionsHint")}>
         <div className="p-4">
-          <textarea className={`${inputCls} min-h-36 resize-y`} value={text} maxLength={MAX} onChange={(e) => setText(e.target.value)} />
-          <div className="mt-2 flex items-center justify-between">
+          <textarea
+            className={`${inputCls} min-h-36 resize-y`}
+            value={text}
+            maxLength={MAX}
+            aria-label={t("settings.instructions")}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={saveText}
+          />
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <span className={`text-xs tabular-nums ${text.length > MAX * 0.9 ? "text-amber-400" : "text-neutral-500"}`}>
               {text.length} / {MAX}
             </span>
-            <button className={btnCls} disabled={text === me.preferences.custom_instructions} onClick={() => save({ preferences: { custom_instructions: text } })}>
-              {t("common.save")}
-            </button>
+            <span className="ml-auto flex items-center gap-3">
+              {dirty && <span className="text-xs text-neutral-500">{t("settings.unsaved")}</span>}
+              <button className={btnCls} disabled={!dirty} onClick={saveText}>
+                {t("common.save")}
+              </button>
+            </span>
           </div>
         </div>
       </Section>

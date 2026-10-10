@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Mavzu sahifa chizilishidan OLDIN qo'llanadi: yorug' mavzuda qorong'i "miltillash" bo'lmaydi */}
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body className="h-screen bg-neutral-900 text-neutral-100">
+      <body className="h-dvh bg-neutral-900 text-neutral-100">
         <I18nProvider>
           <AuthGate>{children}</AuthGate>
         </I18nProvider>

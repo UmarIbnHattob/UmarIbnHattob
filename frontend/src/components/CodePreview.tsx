@@ -49,7 +49,7 @@ export default function CodePreview({ messages, streaming }: { messages: ChatMes
       {/* sandbox: allow-same-origin YO'Q — kod ilovaning cookie/localStorage ga kira olmaydi */}
       <iframe
         key={reload}
-        title="Live preview"
+        title={t("preview.iframeTitle")}
         sandbox="allow-scripts allow-forms allow-modals"
         srcDoc={srcDoc}
         className="min-h-0 flex-1 bg-white"

@@ -32,12 +32,14 @@ export function latestWebCode(messages: ChatMessage[]): WebCode | null {
 
 /** html/css/js dan iframe `srcDoc` yig'adi. */
 export function buildSrcDoc({ html, css, js }: WebCode): string {
-  const style = css ? `<style>${css}</style>` : "";
-  const script = js ? `<script>${js}<\/script>` : "";
+  // Kod ichidagi "</script" / "</style" tegni erta yopib qo'ymasin (JS satrida "<\/" — o'sha "</")
+  const style = css ? `<style>${css.replace(/<\/(style)/gi, "<\\/$1")}</style>` : "";
+  const script = js ? `<script>${js.replace(/<\/(script)/gi, "<\\/$1")}<\/script>` : "";
   if (/<html[\s>]|<!doctype/i.test(html)) {
     let doc = html;
-    if (style) doc = /<\/head>/i.test(doc) ? doc.replace(/<\/head>/i, `${style}</head>`) : style + doc;
-    if (script) doc = /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, `${script}</body>`) : doc + script;
+    // Funksiya bilan almashtiramiz: kod ichidagi "$&", "$'" kabi ketma-ketliklar naqsh sifatida talqin qilinmasin
+    if (style) doc = /<\/head>/i.test(doc) ? doc.replace(/<\/head>/i, () => `${style}</head>`) : style + doc;
+    if (script) doc = /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, () => `${script}</body>`) : doc + script;
     return doc;
   }
   return `<!doctype html><html><head><meta charset="utf-8">${style}</head><body>${html}${script}</body></html>`;

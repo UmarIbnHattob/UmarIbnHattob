@@ -1,11 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import * as authApi from "@/lib/authApi";
 import { fetchMe, patchMe, type Me, type MePatch } from "@/lib/me";
 import { useI18n } from "@/lib/i18n";
+import { clearCanvasData } from "@/lib/canvasStore";
+import { safeNextPath } from "@/lib/nav";
 import Sidebar from "@/components/Sidebar";
 import Modals, { type ModalId } from "@/components/Modals";
 
@@ -47,9 +49,17 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = tekshirilmoqda
   const [modal, setModal] = useState<ModalId | null>(null);
   const isPublic = PUBLIC_PATHS.includes(pathname);
+  // Chiqishda (logout, barcha qurilmalardan chiqish, hisobni o'chirish) shu brauzerdagi canvas chizmasi o'chiriladi
+  const wipeOnLogout = useRef(false);
+  // O'zi chiqqan foydalanuvchi uchun "next" kerak emas (keyingi kirgan odam uning sahifasiga tushmasin)
+  const leftOnPurpose = useRef(false);
+  const meRef = useRef(me);
+  meRef.current = me;
 
   const refreshMe = useCallback(async () => {
-    setMe(await fetchMe().catch(() => null));
+    const next = await fetchMe().catch(() => null);
+    if (!next && meRef.current) wipeOnLogout.current = leftOnPurpose.current = true;
+    setMe(next);
   }, []);
 
   useEffect(() => {
@@ -61,9 +71,22 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (me === undefined) return;
-    if (!me && !isPublic) router.replace("/login");
-    if (me && isPublic) router.replace("/chat");
+    if (!me && !isPublic) {
+      // Kirgandan keyin shu sahifaga qaytish uchun: /login?next=/settings?tab=account
+      const here = leftOnPurpose.current ? null : safeNextPath(window.location.pathname + window.location.search);
+      leftOnPurpose.current = false;
+      router.replace(here && here !== "/" ? `/login?next=${encodeURIComponent(here)}` : "/login");
+    }
+    if (me && isPublic) router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/chat");
   }, [me, isPublic, router]);
+
+  // Sahifalar (canvas) yopilib bo'lgach tozalaymiz: ular chiqishda oxirgi o'zgarishni saqlab ulgurmasin
+  useEffect(() => {
+    if (me === null && wipeOnLogout.current) {
+      wipeOnLogout.current = false;
+      clearCanvasData();
+    }
+  }, [me]);
 
   // Sozlamalarni qo'llash (va tizim mavzusi o'zgarsa kuzatish)
   useEffect(() => {
@@ -96,6 +119,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     try {
       await authApi.logout();
     } finally {
+      wipeOnLogout.current = leftOnPurpose.current = true;
       setMe(null);
     }
   }, []);
@@ -150,9 +174,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <Ctx.Provider value={{ me, updateMe, refreshMe, logout, openModal: setModal }}>
-      <div className="flex h-screen">
+      {/* Telefonda: yuqorida ingichka satr + chapdan chiqadigan menyu; md dan kengda: doimiy chap panel */}
+      <div className="flex h-dvh flex-col md:flex-row">
         <Sidebar />
-        <main className="min-w-0 flex-1 overflow-auto">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
       </div>
       <Modals open={modal} onClose={() => setModal(null)} />
     </Ctx.Provider>

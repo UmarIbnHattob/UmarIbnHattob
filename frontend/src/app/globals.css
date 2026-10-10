@@ -9,6 +9,9 @@
   --n-800: 38 38 38; --n-900: 23 23 23; --n-950: 10 10 10;
   /* Provayder ranglari — qorong'i fon uchun tekshirilgan qadamlar */
   --p-anthropic: #d95926; --p-deepseek: #3987e5; --p-gemini: #199e70;
+  /* Grafikdagi qo'shimcha qatorlar (Whisper, OpenRouter, Groq…): provayder ranglari bilan birga
+     rang-ko'rlik (qo'shni juftlar) va fonga ≥3:1 kontrast tekshiruvidan o'tgan */
+  --s-1: #c98500; --s-2: #d55181; --s-3: #008300; --s-4: #9085e9; --s-5: #e66767;
   color-scheme: dark;
 }
 
@@ -19,6 +22,7 @@
   --n-800: 229 229 229; --n-900: 246 246 247; --n-950: 255 255 255;
   /* Provayder ranglari — yorug' fon uchun */
   --p-anthropic: #eb6834; --p-deepseek: #2a78d6; --p-gemini: #1baf7a;
+  --s-1: #b57800; --s-2: #d55181; --s-3: #008300; --s-4: #6250d6; --s-5: #e34948;
   color-scheme: light;
 }
 
@@ -27,6 +31,19 @@
 :root[data-theme="light"] .text-violet-300 { color: #6d28d9; }
 :root[data-theme="light"] .text-violet-400 { color: #7c3aed; }
 :root[data-theme="light"] .hover\:text-violet-200:hover { color: #5b21b6; }
+
+/* Yorug' fonda holat ranglari (yashil/qizil/sariq matn) ham to'qroq: kichik matn uchun kontrast ≥ 4.5 */
+:root[data-theme="light"] .text-emerald-400 { color: #047857; }
+:root[data-theme="light"] .text-red-400,
+:root[data-theme="light"] .text-red-500,
+:root[data-theme="light"] .hover\:text-red-400:hover { color: #b91c1c; }
+:root[data-theme="light"] .text-amber-400,
+:root[data-theme="light"] .text-amber-500 { color: #b45309; }
+/* Yorug' mavzuda placeholder (standart och kulrang ~2.5:1 edi) */
+:root[data-theme="light"] ::placeholder { color: #6b6b6b; opacity: 1; }
+
+/* Qorong'i mavzuda kichik izoh matnlari (neutral-500, ~3.6:1) o'qilishi uchun neutral-400 */
+:root:not([data-theme="light"]) .text-neutral-500 { color: rgb(var(--n-400)); }
 
 /* Shrift o'lchami (Sozlamalar > Umumiy) — butun interfeys masshtabi */
 :root[data-font="sm"] { font-size: 14px; }
@@ -44,13 +61,16 @@ body {
 }
 
 /* Markdown ko'rinishi (chat javoblari uchun) */
+/* Uzun bo'linmas satrlar (URL, xesh, base64) pufakchadan chiqib ketmaydi; kod bloklari o'z ichida suriladi */
+.markdown { overflow-wrap: anywhere; min-width: 0; }
 .markdown > * + * { margin-top: 0.6rem; }
 .markdown h1, .markdown h2, .markdown h3 { font-weight: 600; margin-top: 1rem; }
 .markdown ul { list-style: disc; padding-left: 1.4rem; }
 .markdown ol { list-style: decimal; padding-left: 1.4rem; }
 .markdown a { color: #60a5fa; text-decoration: underline; }
+:root[data-theme="light"] .markdown a { color: #1d4ed8; }
 .markdown code { background: rgb(var(--n-950)); border-radius: 4px; padding: 0.1rem 0.3rem; font-size: 0.85em; }
-.markdown pre { color: #e6edf3; background: #0d1117; border-radius: 8px; padding: 0.75rem; overflow-x: auto; }
+.markdown pre { color: #e6edf3; background: #0d1117; border-radius: 8px; padding: 0.75rem; overflow-x: auto; overflow-wrap: normal; }
 .markdown pre code { background: transparent; padding: 0; }
 .markdown table { border-collapse: collapse; }
 .markdown th, .markdown td { border: 1px solid rgb(var(--n-700)); padding: 0.3rem 0.6rem; }

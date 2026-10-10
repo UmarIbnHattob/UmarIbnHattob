@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useAuth } from "@/components/AuthGate";
 import { LANGS, useI18n } from "@/lib/i18n";
@@ -51,6 +51,18 @@ export default function GeneralTab() {
     setName(me.display_name ?? "");
     setNick(me.nickname ?? "");
   }, [me.display_name, me.nickname]);
+  // Ism/taxallus maydondan chiqqanda saqlanadi; undan oldin sahifa yopilsa/yangilansa brauzer ogohlantiradi
+  const dirty = useRef(false);
+  dirty.current = name !== (me.display_name ?? "") || nick !== (me.nickname ?? "");
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!dirty.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
 
   const save = async (patch: Parameters<typeof updateMe>[0]) => {
     try {
