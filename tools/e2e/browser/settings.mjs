@@ -121,6 +121,13 @@ await openaiCard.getByPlaceholder("API kalit").fill("sk-good-settings-openai");
 await openaiCard.getByPlaceholder("API kalit").press("Enter");
 await page.getByText(/ta model/).first().waitFor({ timeout: 10000 });
 await sleep(800);
+// Brauzer saqlangan login/parolni kalit va nom maydonlariga yozmasin
+const custom = page.locator("div.rounded-xl.border.p-4", { hasText: "Boshqa (OpenAI-mos)" }).first();
+await custom.getByRole("button", { name: "Qo‘shish" }).click();
+const ac = await page.evaluate(() => [...document.querySelectorAll("#providers ~ * input, section input")].map((i) => `${i.type}:${i.autocomplete}`));
+check("autofill: barcha parol maydonlari new-password", ac.filter((x) => x.startsWith("password:")).every((x) => x === "password:new-password") && ac.some((x) => x.startsWith("password:")), ac.join(" "));
+check("autofill: kalit yonidagi matn maydonlari off", ac.filter((x) => x.startsWith("text:")).every((x) => x === "text:off"), ac.join(" "));
+await custom.getByRole("button", { name: "Bekor qilish" }).click();
 check("provayder: Enter bilan qo'shildi", (await (await ctx.request.get(`${API}/providers`)).json()).length === 1);
 // Takror qo'shish -> 409 + "Tahrirlash"
 await openaiCard.getByRole("button", { name: "Qo‘shish" }).click();

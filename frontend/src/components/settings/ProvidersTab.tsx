@@ -5,7 +5,7 @@ import { Cpu, ExternalLink, Globe2, Loader2, Pencil, Plus, RefreshCw, X } from "
 import { apiFetch, RequestError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { plural, presetName, presetNote, providerName } from "@/lib/providers";
-import { btnCls, btnGhostCls, ConfirmDelete, inputCls, Section, useToast } from "@/components/settings/ui";
+import { btnCls, btnGhostCls, ConfirmDelete, inputCls, PLAIN_INPUT, SECRET_INPUT, Section, useToast } from "@/components/settings/ui";
 
 type Preset = { name: string; base_url: string; needs_key: boolean; local: boolean; key_url: string; note: string };
 type Connected = { id: string; kind: string; name: string; base_url: string; has_key: boolean; model_count: number; free_count: number; local: boolean };
@@ -147,7 +147,7 @@ export default function ProvidersTab() {
               <input
                 type="password"
                 autoFocus
-                autoComplete="off"
+                {...SECRET_INPUT}
                 maxLength={KEY_MAX}
                 aria-label={t("prov.apiKey")}
                 placeholder={t("prov.apiKey")}
@@ -159,6 +159,7 @@ export default function ProvidersTab() {
             {(kind === "custom" || p.local) && (
               <input
                 autoFocus={!p.needs_key}
+                {...PLAIN_INPUT}
                 maxLength={URL_MAX}
                 aria-label={t("prov.baseUrl")}
                 placeholder={t("prov.baseUrl")}
@@ -170,6 +171,7 @@ export default function ProvidersTab() {
             {kind === "custom" && (
               <>
                 <input
+                  {...PLAIN_INPUT}
                   maxLength={NAME_MAX}
                   aria-label={t("prov.name")}
                   placeholder={t("prov.name")}
@@ -179,7 +181,7 @@ export default function ProvidersTab() {
                 />
                 <input
                   type="password"
-                  autoComplete="off"
+                  {...SECRET_INPUT}
                   maxLength={KEY_MAX}
                   aria-label={`${t("prov.apiKey")} (${t("prov.optional")})`}
                   placeholder={`${t("prov.apiKey")} (${t("prov.optional")})`}
@@ -280,6 +282,7 @@ export default function ProvidersTab() {
                   }}
                 >
                   <input
+                    {...PLAIN_INPUT}
                     autoFocus
                     maxLength={NAME_MAX}
                     aria-label={t("prov.name")}
@@ -290,7 +293,7 @@ export default function ProvidersTab() {
                   />
                   <input
                     type="password"
-                    autoComplete="off"
+                    {...SECRET_INPUT}
                     maxLength={KEY_MAX}
                     aria-label={t("prov.newKey")}
                     placeholder={t("prov.newKey")}

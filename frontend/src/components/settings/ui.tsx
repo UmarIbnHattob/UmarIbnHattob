@@ -98,6 +98,16 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
   );
 }
 
+/**
+ * API kalit maydonlari brauzer login formasi deb o'ylanmasin: aks holda Chrome saqlangan email/parolni "Nomi" va
+ * "API kalit" maydonlariga o'zi yozib qo'yadi (parol provayderga kalit sifatida ketadi). `autoComplete="off"` ni
+ * Chrome parol maydonida e'tiborsiz qoldiradi, "new-password" esa saqlangan parolni qo'ymaydi. data-* — parol
+ * menejerlari (1Password, LastPass) uchun.
+ */
+export const SECRET_INPUT = { autoComplete: "new-password", "data-1p-ignore": true, "data-lpignore": "true" } as const;
+/** Kalit yonidagi oddiy matn maydonlari (nom, manzil): login sifatida to'ldirilmasin. */
+export const PLAIN_INPUT = { autoComplete: "off", "data-1p-ignore": true, "data-lpignore": "true" } as const;
+
 export const inputCls = "w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20";
 export const btnCls = "rounded-md bg-violet-600 px-4 py-2 text-sm text-white transition hover:bg-violet-500 disabled:opacity-50";
 export const btnGhostCls = "rounded-md border border-neutral-700 px-4 py-2 text-sm transition hover:bg-neutral-800 disabled:opacity-50";

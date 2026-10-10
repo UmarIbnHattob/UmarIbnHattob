@@ -7,7 +7,7 @@ import { useI18n } from "@/lib/i18n";
 import { API_KEY_LINKS, type Provider } from "@/lib/me";
 import { colorOf, PROVIDER_LABELS } from "@/lib/providers";
 import { useAuth } from "@/components/AuthGate";
-import { btnCls, ConfirmDelete, inputCls, Section, useToast } from "@/components/settings/ui";
+import { btnCls, ConfirmDelete, inputCls, SECRET_INPUT, Section, useToast } from "@/components/settings/ui";
 import QuotaMeter from "@/components/settings/QuotaMeter";
 import ProvidersTab from "@/components/settings/ProvidersTab";
 
@@ -113,7 +113,7 @@ export default function KeysTab() {
             >
               <input
                 type="password"
-                autoComplete="off"
+                {...SECRET_INPUT}
                 aria-label={`${PROVIDER_LABELS[provider]}: ${configured ? t("settings.keyReplace") : t("settings.keyPlaceholder")}`}
                 aria-invalid={!!errors[provider]}
                 placeholder={configured ? t("settings.keyReplace") : t("settings.keyPlaceholder")}

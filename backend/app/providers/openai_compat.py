@@ -203,6 +203,14 @@ async def complete(base_url: str, api_key: str | None, model: str, system: str |
     return "".join(parts)
 
 
+# API o'rniga oddiy sayt manzili berilganda (masalan https://www.kimi.com/en): sayt yo'naltiradi yoki HTML qaytaradi
+NOT_API = (
+    "Bu manzil OpenAI-mos API emas (javob sayt sahifasidan keldi). Provayderning API manzilini kiriting — odatda "
+    "/v1 bilan tugaydi, masalan https://api.example.com/v1. Kalitni ham provayderning API sahifasidan oling "
+    "(sayt paroli emas)."
+)
+
+
 async def list_models(base_url: str, api_key: str | None) -> list[dict]:
     """GET /models — OpenAI formatidagi model ro'yxati. OpenRouter qo'shimcha maydonlarini ham o'qiydi."""
     try:
@@ -210,10 +218,18 @@ async def list_models(base_url: str, api_key: str | None) -> list[dict]:
             r = await client.get(f"{base_url.rstrip('/')}/models", headers=_headers(api_key))
     except httpx.HTTPError as exc:
         raise ProviderError(f"Model ro'yxatini olib bo'lmadi: {exc.__class__.__name__}. Manzil va kalitni tekshiring.")
+    if r.is_redirect:  # API yo'naltirmaydi; sayt esa bosh/kirish sahifasiga yo'naltiradi
+        raise ProviderError(NOT_API)
     if r.status_code != 200:
         raise friendly_http_error(r.status_code, r.text)
+    try:
+        payload = r.json()
+    except ValueError:  # 200, lekin JSON emas (HTML sahifa)
+        raise ProviderError(NOT_API)
+    if not isinstance(payload, dict):
+        raise ProviderError(NOT_API)
     out = []
-    for m in (r.json().get("data") or [])[:800]:
+    for m in (payload.get("data") or [])[:800]:
         mid = m.get("id")
         if not mid or not isinstance(mid, str):
             continue

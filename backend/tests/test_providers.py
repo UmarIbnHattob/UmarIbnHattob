@@ -279,3 +279,22 @@ def test_old_stored_non_chat_models_hidden_from_catalog(client, fake_net, monkey
     assert p["model_count"] == 1 and p["free_count"] == 0
     assert not [m for m in client.get("/api/agent/models").json() if "whisper" in m["id"]]
 
+
+
+@pytest.mark.parametrize("resp", [
+    # Sayt bosh sahifasiga yo'naltiradi (masalan https://www.kimi.com/en)
+    lambda url: httpx.Response(302, headers={"location": "/"}, text="Found. Redirecting to /", request=httpx.Request("GET", url)),
+    # Sayt /models ga 200 bilan HTML sahifa qaytaradi
+    lambda url: httpx.Response(200, text="<!doctype html><html><body>Kimi</body></html>", headers={"content-type": "text/html"},
+                               request=httpx.Request("GET", url)),
+])
+def test_website_url_instead_of_api_gives_clear_error(client, monkeypatch, resp):
+    """API emas, oddiy sayt manzili berilsa: 500 yoki xom '302 Found' emas, tushunarli 400 xabar."""
+    monkeypatch.setattr(settings, "allow_local_providers", True)  # DNS tekshiruvisiz (bu test SSRF haqida emas)
+    async def fake_get(self, url, **kw):
+        return resp(url)
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    r = client.post("/api/providers", json={"kind": "custom", "base_url": "https://custom.example.com/en", "api_key": "x"})
+    assert r.status_code == 400, r.text
+    assert "API emas" in r.json()["detail"] and "/v1" in r.json()["detail"]
+    assert client.get("/api/providers").json() == []
