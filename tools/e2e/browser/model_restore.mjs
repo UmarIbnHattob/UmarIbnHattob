@@ -1,0 +1,23 @@
+// Standart model o'rnatilgan: suhbat reload'da tiklansa oxirgi tanlov qoladi; yangi suhbat — standart model
+import { browser, userCtx, check, summary, WEB, sleep, waitText } from "./h.mjs";
+const b = await browser();
+const { ctx } = await userCtx(b, { tag: "mrestore", prefs: { default_model: "gemini-2.5-flash" } });
+const page = await ctx.newPage();
+await page.goto(WEB + "/chat"); await page.waitForLoadState("networkidle"); await sleep(500);
+const trig = page.locator('button[aria-haspopup="listbox"]');
+check("yangi suhbat standart model bilan", await waitText(trig, "Gemini 2.5 Flash"), await trig.innerText());
+await trig.click();
+await page.getByRole("combobox", { name: "Model qidirish…" }).fill("Gemini 2.5 Pro");
+await page.keyboard.press("Enter");
+await page.locator("textarea").fill("model saqlansin");
+await page.locator("textarea").press("Enter");
+await page.getByText("Javob: model saqlansin").waitFor({ timeout: 15000 });
+await sleep(500);
+await page.reload(); await page.waitForLoadState("networkidle"); await sleep(800);
+check("reload: suhbat tiklandi", await page.getByText("Javob: model saqlansin").isVisible());
+check("reload: tanlangan model (Pro) saqlandi", await waitText(trig, "Gemini 2.5 Pro"), await trig.innerText());
+await page.getByRole("button", { name: "Yangi suhbat" }).first().click(); await sleep(300);
+check("yangi suhbat: yana standart model", await waitText(trig, "Gemini 2.5 Flash"), await trig.innerText());
+await page.goto(WEB + "/chat"); await page.waitForLoadState("networkidle"); await sleep(800);
+check("?c siz ochilganda (yangi suhbat): standart model", await waitText(trig, "Gemini 2.5 Flash"), await trig.innerText());
+await b.close(); summary();

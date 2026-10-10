@@ -1,0 +1,27 @@
+# Bitta domen: /api/* -> backend, qolgani -> frontend. HTTPS sertifikati avtomatik (Let's Encrypt).
+{$DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	handle /api/* {
+		# flush_interval -1: chat javoblari (SSE) bo'lak-bo'lak darhol yuboriladi, buferlanmaydi
+		reverse_proxy {$BACKEND_UPSTREAM:backend:8000} {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000}
+	}
+
+	# Canvas rasmi, ovozli xabar va agent tarixi uchun yetarli; undan kattasi rad etiladi
+	request_body {
+		max_size 40MB
+	}
+}

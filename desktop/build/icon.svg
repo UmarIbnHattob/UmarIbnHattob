@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="core" cx="40%" cy="38%" r="65%">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="0.45" stop-color="#c4b5fd"/><stop offset="1" stop-color="#6366f1"/>
+    </radialGradient>
+    <radialGradient id="bg" cx="50%" cy="45%" r="70%">
+      <stop offset="0" stop-color="#1e1b3a"/><stop offset="1" stop-color="#0a0a0a"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.13" stroke-width="5">
+    <circle cx="256" cy="256" r="196"/><circle cx="256" cy="256" r="142"/><circle cx="256" cy="256" r="88"/>
+  </g>
+  <circle cx="256" cy="256" r="46" fill="#818cf8" filter="url(#glow)" opacity="0.8"/>
+  <circle cx="256" cy="256" r="40" fill="url(#core)"/>
+  <g filter="url(#glow)" opacity="0.9">
+    <circle cx="395" cy="117" r="22" fill="#e07a5f"/><circle cx="135" cy="327" r="20" fill="#4d6bfe"/><circle cx="318" cy="335" r="17" fill="#a78bfa"/>
+  </g>
+  <circle cx="395" cy="117" r="20" fill="#e07a5f"/>
+  <circle cx="135" cy="327" r="18" fill="#4d6bfe"/>
+  <circle cx="318" cy="335" r="15" fill="#a78bfa"/>
+</svg>

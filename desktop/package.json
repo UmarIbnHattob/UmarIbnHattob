@@ -1,0 +1,59 @@
+{
+  "name": "omniai-workspace-desktop",
+  "productName": "OmniAI Workspace",
+  "version": "0.1.0",
+  "description": "OmniAI Workspace desktop ilovasi: AI modellar va kompyuterdagi papkalar bilan ishlash",
+  "main": "src/main.js",
+  "private": true,
+  "omniai": {
+    "appUrl": "http://localhost:3000"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "uz.omniai.workspace",
+    "productName": "OmniAI Workspace",
+    "files": [
+      "src/**/*",
+      "package.json",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "maintainer": "OmniAI"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  }
+}
