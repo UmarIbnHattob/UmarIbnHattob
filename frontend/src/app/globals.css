@@ -22,6 +22,12 @@
   color-scheme: light;
 }
 
+/* Yorug' fonda och binafsha matn ko'rinmaydi: to'qroq binafsha (WCAG kontrast ≥ 4.5) */
+:root[data-theme="light"] .text-violet-200,
+:root[data-theme="light"] .text-violet-300 { color: #6d28d9; }
+:root[data-theme="light"] .text-violet-400 { color: #7c3aed; }
+:root[data-theme="light"] .hover\:text-violet-200:hover { color: #5b21b6; }
+
 /* Shrift o'lchami (Sozlamalar > Umumiy) — butun interfeys masshtabi */
 :root[data-font="sm"] { font-size: 14px; }
 :root[data-font="lg"] { font-size: 17.5px; }
