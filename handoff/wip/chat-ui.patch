@@ -12,7 +12,7 @@ index 65324a6..2821c4f 100644
            <AuthGate>{children}</AuthGate>
          </I18nProvider>
 diff --git a/frontend/src/components/AuthGate.tsx b/frontend/src/components/AuthGate.tsx
-index 0ebebc7..ca9ecbd 100644
+index 0ebebc7..a036342 100644
 --- a/frontend/src/components/AuthGate.tsx
 +++ b/frontend/src/components/AuthGate.tsx
 @@ -1,11 +1,12 @@
@@ -42,24 +42,26 @@ index 0ebebc7..ca9ecbd 100644
  /** Mavzu va shrift: <html data-theme/data-font>. Keyingi ochilishda miltillamasligi uchun brauzerda ham saqlanadi. */
  function applyAppearance(theme: Me["preferences"]["theme"], font: Me["preferences"]["font_size"]) {
    const dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-@@ -47,9 +54,15 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
+@@ -47,9 +54,17 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
    const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = tekshirilmoqda
    const [modal, setModal] = useState<ModalId | null>(null);
    const isPublic = PUBLIC_PATHS.includes(pathname);
 +  // Chiqishda (logout, barcha qurilmalardan chiqish, hisobni o'chirish) shu brauzerdagi canvas chizmasi o'chiriladi
 +  const wipeOnLogout = useRef(false);
++  // O'zi chiqqan foydalanuvchi uchun "next" kerak emas (keyingi kirgan odam uning sahifasiga tushmasin)
++  const leftOnPurpose = useRef(false);
 +  const meRef = useRef(me);
 +  meRef.current = me;
  
    const refreshMe = useCallback(async () => {
 -    setMe(await fetchMe().catch(() => null));
 +    const next = await fetchMe().catch(() => null);
-+    if (!next && meRef.current) wipeOnLogout.current = true;
++    if (!next && meRef.current) wipeOnLogout.current = leftOnPurpose.current = true;
 +    setMe(next);
    }, []);
  
    useEffect(() => {
-@@ -61,10 +74,22 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
+@@ -61,10 +76,23 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
  
    useEffect(() => {
      if (me === undefined) return;
@@ -67,7 +69,8 @@ index 0ebebc7..ca9ecbd 100644
 -    if (me && isPublic) router.replace("/chat");
 +    if (!me && !isPublic) {
 +      // Kirgandan keyin shu sahifaga qaytish uchun: /login?next=/settings?tab=account
-+      const here = safeNextPath(window.location.pathname + window.location.search);
++      const here = leftOnPurpose.current ? null : safeNextPath(window.location.pathname + window.location.search);
++      leftOnPurpose.current = false;
 +      router.replace(here && here !== "/" ? `/login?next=${encodeURIComponent(here)}` : "/login");
 +    }
 +    if (me && isPublic) router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/chat");
@@ -84,15 +87,15 @@ index 0ebebc7..ca9ecbd 100644
    // Sozlamalarni qo'llash (va tizim mavzusi o'zgarsa kuzatish)
    useEffect(() => {
      if (!me) return;
-@@ -96,6 +121,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
+@@ -96,6 +124,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
      try {
        await authApi.logout();
      } finally {
-+      wipeOnLogout.current = true;
++      wipeOnLogout.current = leftOnPurpose.current = true;
        setMe(null);
      }
    }, []);
-@@ -150,9 +176,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
+@@ -150,9 +179,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
  
    return (
      <Ctx.Provider value={{ me, updateMe, refreshMe, logout, openModal: setModal }}>
@@ -2237,7 +2240,7 @@ index 0000000..8b3a563
 +  }, [open, panelRef, triggerRef, closeAt]);
 +}
 diff --git a/frontend/src/hooks/useResizable.ts b/frontend/src/hooks/useResizable.ts
-index 16b8a8f..498f033 100644
+index 16b8a8f..8cff9ce 100644
 --- a/frontend/src/hooks/useResizable.ts
 +++ b/frontend/src/hooks/useResizable.ts
 @@ -1,43 +1,74 @@
@@ -2258,7 +2261,7 @@ index 16b8a8f..498f033 100644
 + * `fits=false` — yonma-yon joy yetmaydi (panel ustma-ust ochilishi kerak).
 + */
 +export function useResizable(initial = 520, min = 320, keep = 360) {
-+  // Foydalanuvchi sudrab tanlagan kenglik (null — avtomatik: konteynerning ~40% i)
++  // Foydalanuvchi sudrab tanlagan kenglik (null — avtomatik: konteynerning ~45% i)
 +  const [desired, setDesired] = useState<number | null>(null);
 +  const [available, setAvailable] = useState(0);
    const dragging = useRef(false);
@@ -2278,7 +2281,7 @@ index 16b8a8f..498f033 100644
 +
 +  const max = Math.max(0, available - keep - 4); // 4 — ajratgich chizig'i
 +  const fits = available > 0 && max >= min;
-+  const auto = Math.max(min, Math.min(initial, available * 0.4));
++  const auto = Math.max(min, Math.min(initial, available * 0.45));
 +  const width = Math.round(Math.max(min, Math.min(desired ?? auto, max)));
 +
 +  const onPointerDown = useCallback((e: React.PointerEvent) => {

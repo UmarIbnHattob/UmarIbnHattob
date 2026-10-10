@@ -1,3 +1,328 @@
+diff --git a/frontend/src/app/media/page.tsx b/frontend/src/app/media/page.tsx
+index a3b14bc..2ef1630 100644
+--- a/frontend/src/app/media/page.tsx
++++ b/frontend/src/app/media/page.tsx
+@@ -1,30 +1,52 @@
+ "use client";
+ 
+-import { useCallback, useEffect, useState } from "react";
++import { useCallback, useEffect, useRef, useState } from "react";
+ import Link from "next/link";
+-import { Download, Loader2, Sparkles, Trash2 } from "lucide-react";
++import { Download, Loader2, Sparkles, X } from "lucide-react";
+ import * as api from "@/lib/mediaApi";
++import { apiFetch } from "@/lib/api";
+ import { useI18n, type TKey } from "@/lib/i18n";
++import { ConfirmDelete, ToastProvider, useToast } from "@/components/settings/ui";
++
++/** Bir sahifadagi rasmlar soni ("Ko'proq yuklash" har safar shuncha qo'shadi). */
++const PAGE = 60;
++/** Backend cheklovi (routers/media.py ImageIn.prompt). */
++const MAX_PROMPT = 4000;
++
++/** Galereya sahifasi: (vaqt, id) kursori bilan — bir xil vaqtli rasmlar chegarada tushib qolmaydi. */
++function getPage(after?: api.MediaItem) {
++  const p = new URLSearchParams({ limit: String(PAGE) });
++  if (after) {
++    p.set("before", after.created_at);
++    p.set("before_id", after.id);
++  }
++  return apiFetch<api.MediaItem[]>(`/media?${p}`);
++}
+ 
+-/** Media Studio: matn bo'yicha rasm yaratish, galereya, yuklab olish. */
+ export default function MediaPage() {
++  return (
++    <ToastProvider>
++      <MediaStudio />
++    </ToastProvider>
++  );
++}
++
++/** Media Studio: matn bo'yicha rasm yaratish, galereya (sahifalab), kattalashtirib ko'rish, yuklab olish. */
++function MediaStudio() {
+   const { t } = useI18n();
++  const toast = useToast();
+   const [models, setModels] = useState<api.ImageModel[]>([]);
+   const [model, setModel] = useState("");
+   const [prompt, setPrompt] = useState("");
+   const [items, setItems] = useState<api.MediaItem[]>([]);
++  const [hasMore, setHasMore] = useState(false);
++  const [loadingMore, setLoadingMore] = useState(false);
+   const [busy, setBusy] = useState(false);
+   const [sec, setSec] = useState(0);
+   const [error, setError] = useState<string | null>(null);
+   const [freshId, setFreshId] = useState<string | null>(null); // yangi rasm "chiqish" animatsiyasi bilan ko'rinadi
+-
+-  const load = useCallback(async () => {
+-    try {
+-      setItems(await api.getMedia());
+-    } catch (e) {
+-      setError((e as Error).message);
+-    }
+-  }, []);
++  const [viewing, setViewing] = useState<api.MediaItem | null>(null);
++  const mod = typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘" : "Ctrl";
+ 
+   useEffect(() => {
+     api
+@@ -34,8 +56,27 @@ export default function MediaPage() {
+         setModel(m[0]?.id ?? "");
+       })
+       .catch((e) => setError((e as Error).message));
+-    load();
+-  }, [load]);
++    getPage()
++      .then((page) => {
++        setItems(page);
++        setHasMore(page.length === PAGE);
++      })
++      .catch((e) => setError((e as Error).message));
++  }, []);
++
++  async function loadMore() {
++    if (loadingMore || !items.length) return;
++    setLoadingMore(true);
++    try {
++      const page = await getPage(items[items.length - 1]);
++      setItems((cur) => [...cur, ...page.filter((p) => !cur.some((c) => c.id === p.id))]);
++      setHasMore(page.length === PAGE);
++    } catch (e) {
++      setError((e as Error).message);
++    } finally {
++      setLoadingMore(false);
++    }
++  }
+ 
+   // Yaratish paytida o'tgan soniyalarni ko'rsatamiz
+   useEffect(() => {
+@@ -53,7 +94,8 @@ export default function MediaPage() {
+       const item = await api.createImage(prompt.trim(), model);
+       setFreshId(item.id);
+       setPrompt("");
+-      await load();
++      // Yangi rasm boshiga qo'shiladi (yuklangan sahifalar joyida qoladi)
++      setItems((cur) => [item, ...cur.filter((c) => c.id !== item.id)]);
+     } catch (e) {
+       setError((e as Error).message);
+     } finally {
+@@ -64,30 +106,48 @@ export default function MediaPage() {
+   async function remove(id: string) {
+     try {
+       await api.deleteMedia(id);
+-      await load();
++      setItems((cur) => cur.filter((c) => c.id !== id));
++      toast(t("media.deleted"));
+     } catch (e) {
+-      setError((e as Error).message);
++      toast((e as Error).message, false);
+     }
+   }
+ 
++  const closeViewer = useCallback(() => setViewing(null), []);
++
+   return (
+-    <div className="mx-auto max-w-5xl p-8">
+-      <h1 className="text-2xl font-semibold">Media Studio</h1>
++    <div className="mx-auto max-w-5xl p-4 sm:p-8">
++      <h1 className="text-2xl font-semibold">{t("nav.media")}</h1>
+       <p className="mt-1 text-sm text-neutral-400">{t("media.subtitle")}</p>
+ 
+       <div className="mt-6 rounded-lg border border-neutral-800 p-4">
+         <textarea
+           value={prompt}
+           onChange={(e) => setPrompt(e.target.value)}
++          onKeyDown={(e) => {
++            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
++              e.preventDefault();
++              generate();
++            }
++          }}
+           rows={3}
++          maxLength={MAX_PROMPT}
++          aria-label={t("field.prompt")}
+           placeholder={t("media.placeholder")}
+           className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-950 p-3 text-sm"
+         />
+-        <div className="mt-3 flex items-center gap-3">
++        <div className="mt-1 flex justify-between gap-3 text-xs text-neutral-500">
++          <span>{t("media.shortcut", { mod })}</span>
++          <span className={`tabular-nums ${prompt.length > MAX_PROMPT * 0.9 ? "text-amber-400" : ""}`}>
++            {prompt.length} / {MAX_PROMPT}
++          </span>
++        </div>
++        <div className="mt-3 flex flex-wrap items-center gap-3">
+           <select
+             value={model}
+             onChange={(e) => setModel(e.target.value)}
+-            className="rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm"
++            aria-label={t("settings.defaultModel")}
++            className="min-w-0 max-w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm"
+           >
+             {models.map((m) => (
+               <option key={m.id} value={m.id}>
+@@ -98,7 +158,7 @@ export default function MediaPage() {
+           <button
+             onClick={generate}
+             disabled={busy || !prompt.trim()}
+-            className="ml-auto flex items-center gap-2 rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-500 disabled:opacity-50"
++            className="ml-auto flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 disabled:opacity-50"
+           >
+             {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+             {busy ? `${t("media.generating")} ${sec}s` : t("media.generate")}
+@@ -108,7 +168,7 @@ export default function MediaPage() {
+       </div>
+ 
+       {error && (
+-        <div className="mt-4 rounded bg-red-500/10 p-3 text-sm text-red-500">
++        <div role="alert" className="mt-4 rounded bg-red-500/10 p-3 text-sm text-red-500">
+           {error}{" "}
+           {error.includes("Settings") && (
+             <Link href="/settings" className="underline">
+@@ -122,53 +182,122 @@ export default function MediaPage() {
+         {busy && <DevelopingCard sec={sec} />}
+         {items.map((it) => (
+           <div key={it.id} className="msg-in group overflow-hidden rounded-lg border border-neutral-800">
+-            {/* eslint-disable-next-line @next/next/no-img-element */}
+-            <img
+-              src={api.fileUrl(it.id)}
+-              alt={it.prompt}
+-              className={`aspect-square w-full bg-neutral-900 object-cover ${it.id === freshId ? "develop" : ""}`}
+-            />
+-            <div className="flex items-start gap-2 p-2">
+-              <p className="line-clamp-2 flex-1 text-xs text-neutral-400">{it.prompt}</p>
++            <button type="button" onClick={() => setViewing(it)} aria-label={t("media.view")} className="block w-full cursor-zoom-in">
++              {/* eslint-disable-next-line @next/next/no-img-element */}
++              <img
++                src={api.fileUrl(it.id)}
++                alt={it.prompt}
++                loading="lazy"
++                className={`aspect-square w-full bg-neutral-900 object-cover ${it.id === freshId ? "develop" : ""}`}
++              />
++            </button>
++            <div className="flex flex-wrap items-start gap-2 p-2">
++              <p className="line-clamp-2 min-w-0 flex-1 text-xs text-neutral-400">{it.prompt}</p>
+               <a
+                 href={api.fileUrl(it.id, true)}
+                 aria-label={t("media.download")}
++                title={t("media.download")}
+                 className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50"
+               >
+                 <Download size={16} />
+               </a>
+-              <button
+-                onClick={() => remove(it.id)}
+-                aria-label={t("common.delete")}
++              <ConfirmDelete
++                question={t("media.confirmDelete")}
++                onConfirm={() => remove(it.id)}
++                size={16}
+                 className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-red-400"
+-              >
+-                <Trash2 size={16} />
+-              </button>
++              />
+             </div>
+           </div>
+         ))}
+       </div>
+-      {!busy && items.length === 0 && !error && (
+-        <p className="mt-10 text-center text-sm text-neutral-500">{t("media.empty")}</p>
++      {hasMore && (
++        <div className="mt-6 flex justify-center">
++          <button
++            onClick={loadMore}
++            disabled={loadingMore}
++            className="flex items-center gap-2 rounded-md border border-neutral-700 px-4 py-2 text-sm transition hover:bg-neutral-800 disabled:opacity-50"
++          >
++            {loadingMore && <Loader2 size={15} className="animate-spin" />}
++            {t("media.loadMore")}
++          </button>
++        </div>
+       )}
++      {!busy && items.length === 0 && !error && <p className="mt-10 text-center text-sm text-neutral-500">{t("media.empty")}</p>}
++      {viewing && <Lightbox item={viewing} onClose={closeViewer} />}
++    </div>
++  );
++}
++
++/** Rasmni to'liq o'lchamda ko'rish: Esc, fon yoki × bilan yopiladi; fokus oynada qoladi va keyin joyiga qaytadi. */
++function Lightbox({ item, onClose }: { item: api.MediaItem; onClose: () => void }) {
++  const { t } = useI18n();
++  const ref = useRef<HTMLDivElement>(null);
++  const closeRef = useRef<HTMLButtonElement>(null);
++  useEffect(() => {
++    const prev = document.activeElement as HTMLElement | null;
++    closeRef.current?.focus();
++    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
++    window.addEventListener("keydown", onKey);
++    return () => {
++      window.removeEventListener("keydown", onKey);
++      if (prev?.isConnected) prev.focus();
++    };
++  }, [onClose]);
++  const trap = (e: React.KeyboardEvent) => {
++    if (e.key !== "Tab" || !ref.current) return;
++    const items = [...ref.current.querySelectorAll<HTMLElement>("a[href], button")];
++    const i = items.indexOf(document.activeElement as HTMLElement);
++    e.preventDefault();
++    items[(i + (e.shiftKey ? items.length - 1 : 1)) % items.length]?.focus();
++  };
++  return (
++    <div
++      ref={ref}
++      role="dialog"
++      aria-modal="true"
++      aria-label={item.prompt}
++      onKeyDown={trap}
++      onClick={onClose}
++      className="backdrop-in fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/85 p-4 backdrop-blur-sm"
++    >
++      {/* eslint-disable-next-line @next/next/no-img-element */}
++      <img
++        src={api.fileUrl(item.id)}
++        alt={item.prompt}
++        onClick={(e) => e.stopPropagation()}
++        className="modal-in max-h-[80vh] max-w-full rounded-lg object-contain shadow-2xl"
++      />
++      <div onClick={(e) => e.stopPropagation()} className="flex w-full max-w-2xl items-start gap-2 text-sm text-white/90">
++        <p className="line-clamp-3 min-w-0 flex-1">{item.prompt}</p>
++        <a href={api.fileUrl(item.id, true)} aria-label={t("media.download")} title={t("media.download")} className="rounded-md p-1.5 hover:bg-white/10">
++          <Download size={18} />
++        </a>
++        <button ref={closeRef} type="button" onClick={onClose} aria-label={t("common.close")} title={t("common.close")} className="rounded-md p-1.5 hover:bg-white/10">
++          <X size={18} />
++        </button>
++      </div>
+     </div>
+   );
+ }
+ 
+ const DEV_PHRASES: TKey[] = ["media.dev.1", "media.dev.2", "media.dev.3", "media.dev.4", "media.dev.5"];
+ 
+-/** Rasm yaratilayotganda: Polaroid kartochka, skaner nuri va almashib turadigan yozuvlar. */
++/**
++ * Rasm yaratilayotganda: Polaroid kartochka, skaner nuri va almashib turadigan yozuvlar.
++ * Ranglar mavzuga bog'liq emas (Polaroid ikkala mavzuda ham oq ramkali).
++ */
+ function DevelopingCard({ sec }: { sec: number }) {
+   const { t } = useI18n();
+   const phrase = t(DEV_PHRASES[Math.floor(sec / 3) % DEV_PHRASES.length]);
+   return (
+-    <div className="msg-in rounded-lg bg-neutral-100 p-2 pb-8 shadow-xl" style={{ transform: "rotate(-1.5deg)" }}>
+-      <div className="scan relative flex aspect-square items-center justify-center overflow-hidden rounded bg-gradient-to-br from-neutral-800 via-neutral-900 to-black">
+-        <span key={phrase} className="fade-swap px-4 text-center text-sm text-neutral-300">
++    <div role="status" className="msg-in rounded-lg bg-[#f5f5f4] p-2 pb-8 shadow-xl ring-1 ring-black/5" style={{ transform: "rotate(-1.5deg)" }}>
++      <div className="scan relative flex aspect-square items-center justify-center overflow-hidden rounded bg-gradient-to-br from-[#262626] via-[#171717] to-black">
++        <span key={phrase} className="fade-swap px-4 text-center text-sm text-[#d4d4d4]">
+           {phrase}
+         </span>
+       </div>
+-      <p className="mt-2 text-center font-mono text-xs text-neutral-600">{sec}s</p>
++      <p className="mt-2 text-center font-mono text-xs text-[#52525b]">{sec}s</p>
+     </div>
+   );
+ }
 diff --git a/frontend/src/app/settings/page.tsx b/frontend/src/app/settings/page.tsx
 index 2a4e3b3..d044c35 100644
 --- a/frontend/src/app/settings/page.tsx
@@ -137,6 +462,529 @@ index 2a4e3b3..d044c35 100644
          <active.Comp />
        </div>
      </div>
+diff --git a/frontend/src/components/AccountMenu.tsx b/frontend/src/components/AccountMenu.tsx
+index b292101..72ba474 100644
+--- a/frontend/src/components/AccountMenu.tsx
++++ b/frontend/src/components/AccountMenu.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useEffect, useRef, useState } from "react";
++import { useEffect, useLayoutEffect, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import {
+   ArrowUpCircle,
+@@ -22,10 +22,78 @@ import {
+   Sun,
+ } from "lucide-react";
+ import { useAuth } from "@/components/AuthGate";
+-import { LANGS, useI18n } from "@/lib/i18n";
++import { LANGS, useI18n, type TKey } from "@/lib/i18n";
+ import { API_KEY_LINKS, initials, type Preferences } from "@/lib/me";
+ 
+ type Sub = "language" | "learn" | "keys" | "theme" | null;
++const SUB_LABEL: Record<Exclude<Sub, null>, TKey> = { theme: "menu.theme", language: "menu.language", learn: "menu.learn", keys: "menu.apiKeys" };
++
++const SUB_W = 256; // yon menyu kengligi (w-64)
++const itemCls = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-neutral-200 outline-none transition-colors hover:bg-neutral-800 focus-visible:bg-neutral-800";
++
++/** Fokusni ro'yxat ichidagi keyingi/oldingi bandga o'tkazadi (↑/↓, Home/End). */
++function moveFocus(container: HTMLElement | null, e: React.KeyboardEvent) {
++  if (!container || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return false;
++  // Faqat shu ro'yxatning o'z bandlari (ichki yon menyu bandlari emas)
++  const items = [...container.querySelectorAll<HTMLElement>("[data-mi]")].filter((el) => el.closest("[role=menu]") === container);
++  if (!items.length) return false;
++  e.preventDefault();
++  const i = items.indexOf(document.activeElement as HTMLElement);
++  const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
++  items[i < 0 && e.key === "ArrowUp" ? items.length - 1 : next]?.focus();
++  return true;
++}
++
++/**
++ * Menyu bandi. Komponent tashqarida e'lon qilingan: hover holati o'zgarganda bandlar qayta yaratilmaydi
++ * (aks holda ro'yxat har safar miltillab, animatsiyasi qaytadan boshlanadi).
++ */
++function MenuItem({
++  icon: Icon,
++  label,
++  right,
++  onClick,
++  subId,
++  sub,
++  onHoverSub,
++  onOpenSub,
++}: {
++  icon: typeof Sun;
++  label: string;
++  right?: React.ReactNode;
++  onClick?: () => void;
++  subId?: Exclude<Sub, null>;
++  sub: Sub;
++  onHoverSub: (s: Sub) => void;
++  onOpenSub: (s: Exclude<Sub, null>, focus: boolean) => void;
++}) {
++  const expanded = !!subId && sub === subId;
++  return (
++    <button
++      type="button"
++      role="menuitem"
++      data-mi=""
++      data-sub={subId}
++      aria-haspopup={subId ? "menu" : undefined}
++      aria-expanded={subId ? expanded : undefined}
++      // Sichqoncha bilan ustiga kelganda yon menyu ochiladi; barmoq bilan bosilganda — onClick
++      onPointerEnter={(e) => e.pointerType === "mouse" && onHoverSub(subId ?? null)}
++      onClick={(e) => (subId ? onOpenSub(subId, e.detail === 0) : onClick?.())}
++      onKeyDown={(e) => {
++        if (subId && e.key === "ArrowRight") {
++          e.preventDefault();
++          onOpenSub(subId, true);
++        }
++      }}
++      className={`${itemCls} ${expanded ? "bg-neutral-800" : ""}`}
++    >
++      <Icon size={17} className="shrink-0 text-neutral-400" />
++      <span className="flex-1">{label}</span>
++      {right}
++      {subId && <ChevronRight size={15} className="text-neutral-500" />}
++    </button>
++  );
++}
+ 
+ /** Chap pastdagi hisob tugmasi va undan ochiladigan menyu (Anthropic uslubida). */
+ export default function AccountMenu() {
+@@ -34,12 +102,22 @@ export default function AccountMenu() {
+   const router = useRouter();
+   const [open, setOpen] = useState(false);
+   const [sub, setSub] = useState<Sub>(null);
++  const [inline, setInline] = useState(false); // tor ekranda yon menyu band ostida ochiladi
+   const ref = useRef<HTMLDivElement>(null);
++  const panelRef = useRef<HTMLDivElement>(null);
++  const listRef = useRef<HTMLDivElement>(null);
++  const subRef = useRef<HTMLDivElement>(null);
++  const btnRef = useRef<HTMLButtonElement>(null);
++  const focusFirst = useRef<"menu" | "sub" | null>(null);
+ 
+   useEffect(() => {
+     if (!open) return;
+     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key !== "Escape") return;
++      setOpen(false);
++      btnRef.current?.focus();
++    };
+     window.addEventListener("mousedown", onDown);
+     window.addEventListener("keydown", onKey);
+     return () => {
+@@ -48,11 +126,34 @@ export default function AccountMenu() {
+     };
+   }, [open]);
+ 
++  // Yon menyu ekranga sig'adimi? Sig'masa (telefon) — band ostida ochiladi. Menyu ochilganda bir marta o'lchanadi.
++  useLayoutEffect(() => {
++    if (open && panelRef.current) setInline(panelRef.current.getBoundingClientRect().right + 8 + SUB_W > window.innerWidth);
++  }, [open]);
++
++  // Klaviatura bilan ochilganda fokus menyuning (yoki yon menyuning) birinchi bandiga o'tadi
++  useEffect(() => {
++    const target = focusFirst.current === "sub" ? subRef.current : focusFirst.current === "menu" ? listRef.current : null;
++    if (!target) return;
++    focusFirst.current = null;
++    target.querySelector<HTMLElement>("[data-mi]")?.focus();
++  }, [open, sub]);
++
+   const go = (fn: () => void) => () => {
+     setOpen(false);
+     setSub(null);
++    btnRef.current?.focus(); // oyna yopilganda fokus shu tugmaga qaytadi
+     fn();
+   };
++  const openSub = (s: Exclude<Sub, null>, focus: boolean) => {
++    if (focus) focusFirst.current = "sub";
++    setSub(s);
++  };
++  const closeSub = () => {
++    const parent = listRef.current?.querySelector<HTMLElement>(`[data-sub="${sub}"]`);
++    setSub(null);
++    parent?.focus();
++  };
+   const mod = typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘" : "Ctrl";
+   const planLabel = t(me.plan === "byok" ? "plan.byok" : me.plan === "free" ? "plan.free" : "plan.none");
+   const themes: { id: Preferences["theme"]; icon: typeof Sun; label: string }[] = [
+@@ -60,93 +161,99 @@ export default function AccountMenu() {
+     { id: "light", icon: Sun, label: t("theme.light") },
+     { id: "dark", icon: Moon, label: t("theme.dark") },
+   ];
++  const item = { sub, onHoverSub: setSub, onOpenSub: openSub };
+ 
+-  const Item = ({ icon: Icon, label, right, onClick, subId }: { icon: typeof Sun; label: string; right?: React.ReactNode; onClick?: () => void; subId?: Sub }) => (
+-    <button
+-      onClick={onClick}
+-      onMouseEnter={() => setSub(subId ?? null)}
+-      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-neutral-200 transition-colors hover:bg-neutral-800 ${sub && sub === subId ? "bg-neutral-800" : ""}`}
++  const subItems = () => (
++    <>
++      {sub === "theme" &&
++        themes.map(({ id, icon: Icon, label }) => (
++          <button key={id} type="button" role="menuitemradio" aria-checked={me.preferences.theme === id} data-mi="" onClick={go(() => updateMe({ preferences: { theme: id } }))} className={itemCls}>
++            <Icon size={16} className="text-neutral-400" />
++            <span className="flex-1">{label}</span>
++            {me.preferences.theme === id && <span className="h-2 w-2 rounded-full bg-violet-400" />}
++          </button>
++        ))}
++      {sub === "language" &&
++        LANGS.map((l) => (
++          <button key={l.id} type="button" role="menuitemradio" aria-checked={lang === l.id} data-mi="" onClick={go(() => updateMe({ preferences: { language: l.id } }))} className={itemCls}>
++            <span>{l.flag}</span>
++            <span className="flex-1">{l.label}</span>
++            {lang === l.id && <span className="h-2 w-2 rounded-full bg-violet-400" />}
++          </button>
++        ))}
++      {sub === "learn" &&
++        (
++          [
++            [Info, "menu.about", () => openModal("about")],
++            [Keyboard, "menu.shortcuts", () => openModal("shortcuts")],
++            [Shield, "menu.privacy", () => router.push("/settings?tab=privacy")],
++          ] as const
++        ).map(([Icon, key, fn]) => (
++          <button key={key} type="button" role="menuitem" data-mi="" onClick={go(fn)} className={itemCls}>
++            <Icon size={16} className="text-neutral-400" />
++            <span className="flex-1">{t(key)}</span>
++          </button>
++        ))}
++      {sub === "keys" &&
++        Object.values(API_KEY_LINKS).map((l) => (
++          <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" role="menuitem" data-mi="" onClick={() => setOpen(false)} className={itemCls}>
++            <span className="flex-1">{l.label}</span>
++            <ExternalLink size={14} className="text-neutral-500" />
++          </a>
++        ))}
++    </>
++  );
++  const subKeys = (e: React.KeyboardEvent) => {
++    if (moveFocus(subRef.current, e)) return;
++    if (e.key === "ArrowLeft" || e.key === "Escape") {
++      // Faqat yon menyu yopiladi, asosiy menyu ochiq qoladi
++      e.preventDefault();
++      e.stopPropagation();
++      closeSub();
++    }
++  };
++  const subPanel = (side: boolean) => (
++    <div
++      key={sub}
++      ref={subRef}
++      role="menu"
++      aria-label={sub ? t(SUB_LABEL[sub]) : undefined}
++      onKeyDown={subKeys}
++      onMouseLeave={side ? () => setSub(null) : undefined}
++      className={
++        side
++          ? "slide-in-right absolute bottom-0 left-full ml-2 w-64 rounded-xl border border-neutral-800 bg-neutral-900 p-1.5 shadow-2xl"
++          : "pop-in mb-1 ml-5 border-l border-neutral-800 pl-1.5"
++      }
+     >
+-      <Icon size={17} className="shrink-0 text-neutral-400" />
+-      <span className="flex-1">{label}</span>
+-      {right}
+-      {subId && <ChevronRight size={15} className="text-neutral-500" />}
+-    </button>
++      {subItems()}
++    </div>
++  );
++  // Asosiy bandlar; tor ekranda ochilgan yon menyu o'z bandining ostida chiziladi
++  const withSub = (s: Exclude<Sub, null>, node: React.ReactNode) => (
++    <div key={s}>
++      {node}
++      {inline && sub === s && subPanel(false)}
++    </div>
+   );
+ 
+   return (
+-    <div ref={ref} className="relative">
+-      {open && (
+-        <div className="pop-in absolute bottom-full left-0 z-40 mb-2 w-72 rounded-xl border border-neutral-800 bg-neutral-900 p-1.5 shadow-2xl">
+-          <div className="truncate px-3 pb-1.5 pt-1 text-xs text-neutral-500">{me.email}</div>
+-          <div className="stagger">
+-            <Item icon={Settings} label={t("menu.settings")} right={<kbd className="text-xs text-neutral-500">{mod}+,</kbd>} onClick={go(() => router.push("/settings"))} />
+-            <Item icon={BarChart3} label={t("menu.usage")} onClick={go(() => router.push("/settings?tab=usage"))} />
+-            <Item icon={sunOrMoon(me.preferences.theme)} label={t("menu.theme")} subId="theme" />
+-            <Item icon={Globe} label={t("menu.language")} subId="language" right={<span className="text-xs text-neutral-500">{lang.toUpperCase()}</span>} />
+-            <Item icon={HelpCircle} label={t("menu.help")} onClick={go(() => openModal("help"))} />
+-            <div className="my-1 h-px bg-neutral-800" />
+-            <Item icon={ArrowUpCircle} label={t("menu.upgrade")} onClick={go(() => openModal("upgrade"))} />
+-            <Item icon={LayoutGrid} label={t("menu.apps")} onClick={go(() => openModal("apps"))} />
+-            <Item icon={Info} label={t("menu.learn")} subId="learn" />
+-            <div className="my-1 h-px bg-neutral-800" />
+-            <Item icon={KeyRound} label={t("menu.apiKeys")} subId="keys" />
+-            <Item icon={LogOut} label={t("menu.logout")} onClick={go(logout)} />
+-          </div>
+-
+-          {sub && (
+-            <div
+-              key={sub}
+-              onMouseLeave={() => setSub(null)}
+-              className="slide-in-right absolute bottom-0 left-full ml-2 w-64 rounded-xl border border-neutral-800 bg-neutral-900 p-1.5 shadow-2xl"
+-            >
+-              {sub === "theme" &&
+-                themes.map(({ id, icon: Icon, label }) => (
+-                  <button key={id} onClick={go(() => updateMe({ preferences: { theme: id } }))} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-neutral-800">
+-                    <Icon size={16} className="text-neutral-400" />
+-                    <span className="flex-1 text-left">{label}</span>
+-                    {me.preferences.theme === id && <span className="h-2 w-2 rounded-full bg-violet-400" />}
+-                  </button>
+-                ))}
+-              {sub === "language" &&
+-                LANGS.map((l) => (
+-                  <button key={l.id} onClick={go(() => updateMe({ preferences: { language: l.id } }))} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-neutral-800">
+-                    <span>{l.flag}</span>
+-                    <span className="flex-1 text-left">{l.label}</span>
+-                    {lang === l.id && <span className="h-2 w-2 rounded-full bg-violet-400" />}
+-                  </button>
+-                ))}
+-              {sub === "learn" &&
+-                (
+-                  [
+-                    [Info, "menu.about", () => openModal("about")],
+-                    [Keyboard, "menu.shortcuts", () => openModal("shortcuts")],
+-                    [Shield, "menu.privacy", () => router.push("/settings?tab=privacy")],
+-                  ] as const
+-                ).map(([Icon, key, fn]) => (
+-                  <button key={key} onClick={go(fn)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-neutral-800">
+-                    <Icon size={16} className="text-neutral-400" />
+-                    <span className="flex-1 text-left">{t(key)}</span>
+-                  </button>
+-                ))}
+-              {sub === "keys" &&
+-                Object.values(API_KEY_LINKS).map((l) => (
+-                  <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-neutral-800">
+-                    <span className="flex-1">{l.label}</span>
+-                    <ExternalLink size={14} className="text-neutral-500" />
+-                  </a>
+-                ))}
+-            </div>
+-          )}
+-        </div>
+-      )}
+-
++    <div
++      ref={ref}
++      className="relative"
++      // Tab bilan menyudan chiqilsa — yopiladi
++      onBlur={(e) => open && e.relatedTarget && !ref.current?.contains(e.relatedTarget as Node) && setOpen(false)}
++    >
+       <button
+-        onClick={() => {
++        ref={btnRef}
++        onClick={(e) => {
++          if (!open && e.detail === 0) focusFirst.current = "menu";
+           setOpen((o) => !o);
+           setSub(null);
+         }}
+-        aria-label="account"
++        aria-label={t("menu.account")}
++        aria-haspopup="menu"
++        aria-expanded={open}
+         className={`flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-neutral-900 ${open ? "bg-neutral-900" : ""}`}
+       >
+         <span
+@@ -161,6 +268,33 @@ export default function AccountMenu() {
+         </span>
+         <ChevronsUpDown size={15} className="text-neutral-500" />
+       </button>
++
++      {open && (
++        <div ref={panelRef} className="pop-in absolute bottom-full left-0 z-40 mb-2 w-72 max-w-[calc(100vw-1rem)] rounded-xl border border-neutral-800 bg-neutral-900 p-1.5 shadow-2xl">
++          <div className="truncate px-3 pb-1.5 pt-1 text-xs text-neutral-500">{me.email}</div>
++          <div
++            ref={listRef}
++            role="menu"
++            aria-label={t("menu.account")}
++            onKeyDown={(e) => moveFocus(listRef.current, e)}
++            className="stagger max-h-[calc(100vh-7rem)] overflow-y-auto"
++          >
++            <MenuItem {...item} icon={Settings} label={t("menu.settings")} right={<kbd className="text-xs text-neutral-500">{mod}+,</kbd>} onClick={go(() => router.push("/settings"))} />
++            <MenuItem {...item} icon={BarChart3} label={t("menu.usage")} onClick={go(() => router.push("/settings?tab=usage"))} />
++            {withSub("theme", <MenuItem {...item} icon={sunOrMoon(me.preferences.theme)} label={t("menu.theme")} subId="theme" />)}
++            {withSub("language", <MenuItem {...item} icon={Globe} label={t("menu.language")} subId="language" right={<span className="text-xs text-neutral-500">{lang.toUpperCase()}</span>} />)}
++            <MenuItem {...item} icon={HelpCircle} label={t("menu.help")} onClick={go(() => openModal("help"))} />
++            <div role="separator" className="my-1 h-px bg-neutral-800" />
++            <MenuItem {...item} icon={ArrowUpCircle} label={t("menu.upgrade")} onClick={go(() => openModal("upgrade"))} />
++            <MenuItem {...item} icon={LayoutGrid} label={t("menu.apps")} onClick={go(() => openModal("apps"))} />
++            {withSub("learn", <MenuItem {...item} icon={Info} label={t("menu.learn")} subId="learn" />)}
++            <div role="separator" className="my-1 h-px bg-neutral-800" />
++            {withSub("keys", <MenuItem {...item} icon={KeyRound} label={t("menu.apiKeys")} subId="keys" />)}
++            <MenuItem {...item} icon={LogOut} label={t("menu.logout")} onClick={go(logout)} />
++          </div>
++          {sub && !inline && subPanel(true)}
++        </div>
++      )}
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/Modals.tsx b/frontend/src/components/Modals.tsx
+index d3a78d6..bfefd31 100644
+--- a/frontend/src/components/Modals.tsx
++++ b/frontend/src/components/Modals.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useEffect, useState } from "react";
++import { useEffect, useId, useRef, useState } from "react";
+ import { Check, ChevronDown, Globe, Laptop, Smartphone, Sparkles, X } from "lucide-react";
+ import { useI18n, type TKey } from "@/lib/i18n";
+ import { getDesktop } from "@/lib/desktop";
+@@ -10,23 +10,61 @@ import OrbitLogo from "@/components/OrbitLogo";
+ export type ModalId = "help" | "upgrade" | "apps" | "about" | "shortcuts";
+ export const APP_VERSION = "0.2.0";
+ 
++const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
++
++/**
++ * Oyna qobig'i: ochilganda fokus oynaga o'tadi, Tab oyna ichida aylanadi, yopilganda fokus avvalgi joyiga qaytadi.
++ * Esc va Ctrl+, (sozlamalarga o'tish) oynani yopadi.
++ */
+ function Shell({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
++  const { t } = useI18n();
++  const ref = useRef<HTMLDivElement>(null);
++  const titleId = useId();
+   useEffect(() => {
+-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && e.key === ",")) onClose();
++    };
+     window.addEventListener("keydown", onKey);
+     return () => window.removeEventListener("keydown", onKey);
+   }, [onClose]);
++  useEffect(() => {
++    const prev = document.activeElement as HTMLElement | null;
++    ref.current?.focus();
++    return () => {
++      if (prev?.isConnected) prev.focus();
++    };
++  }, []);
++  const trap = (e: React.KeyboardEvent) => {
++    if (e.key !== "Tab" || !ref.current) return;
++    const items = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
++    if (!items.length) return e.preventDefault();
++    const first = items[0], last = items[items.length - 1];
++    const cur = document.activeElement;
++    if (e.shiftKey && (cur === first || cur === ref.current)) {
++      e.preventDefault();
++      last.focus();
++    } else if (!e.shiftKey && cur === last) {
++      e.preventDefault();
++      first.focus();
++    }
++  };
+   return (
+     <div className="backdrop-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={onClose}>
+       <div
++        ref={ref}
+         role="dialog"
+-        aria-label={title}
++        aria-modal="true"
++        aria-labelledby={titleId}
++        tabIndex={-1}
++        onKeyDown={trap}
+         onClick={(e) => e.stopPropagation()}
+-        className={`modal-in max-h-[85vh] w-full overflow-auto rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl ${wide ? "max-w-3xl" : "max-w-lg"}`}
++        className={`modal-in max-h-[85vh] w-full overflow-auto rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl outline-none ${wide ? "max-w-3xl" : "max-w-lg"}`}
+       >
+         <div className="mb-4 flex items-center justify-between">
+-          <h2 className="text-lg font-semibold">{title}</h2>
+-          <button onClick={onClose} aria-label="close" className="rounded-md p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50">
++          <h2 id={titleId} className="text-lg font-semibold">
++            {title}
++          </h2>
++          <button onClick={onClose} aria-label={t("common.close")} title={t("common.close")} className="rounded-md p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-50">
+             <X size={18} />
+           </button>
+         </div>
+@@ -38,14 +76,18 @@ function Shell({ title, onClose, wide, children }: { title: string; onClose: ()
+ 
+ function Help() {
+   const { t } = useI18n();
+-  const [open, setOpen] = useState<number | null>(0);
++  const [open, setOpen] = useState<number | null>(1); // birinchi savol ochiq
+   return (
+     <div className="space-y-2">
+       {[1, 2, 3, 4, 5].map((i) => (
+         <div key={i} className="rounded-lg border border-neutral-800">
+-          <button onClick={() => setOpen(open === i ? null : i)} className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium">
++          <button
++            onClick={() => setOpen(open === i ? null : i)}
++            aria-expanded={open === i}
++            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium"
++          >
+             {t(`help.q${i}` as TKey)}
+-            <ChevronDown size={16} className={`text-neutral-500 transition-transform ${open === i ? "rotate-180" : ""}`} />
++            <ChevronDown size={16} className={`shrink-0 text-neutral-500 transition-transform ${open === i ? "rotate-180" : ""}`} />
+           </button>
+           <div className="accordion" data-open={open === i}>
+             <div>
+@@ -141,34 +183,40 @@ function About() {
+   );
+ }
+ 
+-export function ShortcutsList() {
++/** Tezkor tugmalar. Yuborish tugmasi sozlamaga qarab: Enter yoki Ctrl+Enter. `plain` — tashqi ramkasiz (Section ichida). */
++export function ShortcutsList({ plain }: { plain?: boolean }) {
+   const { t } = useI18n();
++  const { me } = useAuth();
+   const mod = typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘" : "Ctrl";
+   const rows: [string[], TKey][] = [
+-    [["Enter"], "shortcuts.send"],
+-    [["Shift", "Enter"], "shortcuts.newline"],
++    ...(me.preferences.send_with_enter
++      ? ([
++          [["Enter"], "shortcuts.send"],
++          [["Shift", "Enter"], "shortcuts.newline"],
++        ] as [string[], TKey][])
++      : ([
++          [[mod, "Enter"], "shortcuts.send"],
++          [["Enter"], "shortcuts.newline"],
++        ] as [string[], TKey][])),
+     [[mod, "Shift", "O"], "shortcuts.newChat"],
+     [[mod, ","], "shortcuts.settings"],
+     [[mod, "Shift", "L"], "shortcuts.toggleTheme"],
+     [[mod, "/"], "shortcuts.list"],
+     [["Esc"], "shortcuts.cancelVoice"],
+   ];
+-  return (
+-    <div className="divide-y divide-neutral-800 rounded-xl border border-neutral-800">
+-      {rows.map(([keys, label]) => (
+-        <div key={label} className="flex items-center justify-between px-4 py-2.5 text-sm">
+-          <span className="text-neutral-300">{t(label)}</span>
+-          <span className="flex gap-1">
+-            {keys.map((k) => (
+-              <kbd key={k} className="min-w-6 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 text-center font-mono text-xs shadow-[0_2px_0_rgb(var(--n-700))]">
+-                {k}
+-              </kbd>
+-            ))}
+-          </span>
+-        </div>
+-      ))}
++  const list = rows.map(([keys, label]) => (
++    <div key={label} className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
++      <span className="text-neutral-300">{t(label)}</span>
++      <span className="flex shrink-0 gap-1">
++        {keys.map((k) => (
++          <kbd key={k} className="min-w-6 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 text-center font-mono text-xs shadow-[0_2px_0_rgb(var(--n-700))]">
++            {k}
++          </kbd>
++        ))}
++      </span>
+     </div>
+-  );
++  ));
++  return plain ? <>{list}</> : <div className="divide-y divide-neutral-800 rounded-xl border border-neutral-800">{list}</div>;
+ }
+ 
+ export default function Modals({ open, onClose }: { open: ModalId | null; onClose: () => void }) {
 diff --git a/frontend/src/components/ModelSelector.tsx b/frontend/src/components/ModelSelector.tsx
 index 6883fb6..f608e1b 100644
 --- a/frontend/src/components/ModelSelector.tsx
@@ -610,6 +1458,37 @@ index 312f0d4..9c5aa35 100644
            </div>
          </div>
        </Section>
+diff --git a/frontend/src/components/settings/GeneralTab.tsx b/frontend/src/components/settings/GeneralTab.tsx
+index f2b044a..e2911f6 100644
+--- a/frontend/src/components/settings/GeneralTab.tsx
++++ b/frontend/src/components/settings/GeneralTab.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { Monitor, Moon, Sun } from "lucide-react";
+ import { useAuth } from "@/components/AuthGate";
+ import { LANGS, useI18n } from "@/lib/i18n";
+@@ -51,6 +51,18 @@ export default function GeneralTab() {
+     setName(me.display_name ?? "");
+     setNick(me.nickname ?? "");
+   }, [me.display_name, me.nickname]);
++  // Ism/taxallus maydondan chiqqanda saqlanadi; undan oldin sahifa yopilsa/yangilansa brauzer ogohlantiradi
++  const dirty = useRef(false);
++  dirty.current = name !== (me.display_name ?? "") || nick !== (me.nickname ?? "");
++  useEffect(() => {
++    const warn = (e: BeforeUnloadEvent) => {
++      if (!dirty.current) return;
++      e.preventDefault();
++      e.returnValue = "";
++    };
++    window.addEventListener("beforeunload", warn);
++    return () => window.removeEventListener("beforeunload", warn);
++  }, []);
+ 
+   const save = async (patch: Parameters<typeof updateMe>[0]) => {
+     try {
 diff --git a/frontend/src/components/settings/KeysTab.tsx b/frontend/src/components/settings/KeysTab.tsx
 index 9f8e0f6..24d9cb9 100644
 --- a/frontend/src/components/settings/KeysTab.tsx
@@ -1182,6 +2061,39 @@ index c1448a2..29a94e4 100644
              </div>
            ))}
          </Section>
+diff --git a/frontend/src/components/settings/QuotaMeter.tsx b/frontend/src/components/settings/QuotaMeter.tsx
+index db223bc..45a34cb 100644
+--- a/frontend/src/components/settings/QuotaMeter.tsx
++++ b/frontend/src/components/settings/QuotaMeter.tsx
+@@ -2,13 +2,14 @@
+ 
+ import { useEffect, useState } from "react";
+ import { apiFetch } from "@/lib/api";
++import { formatDate } from "@/lib/date";
+ import { useI18n } from "@/lib/i18n";
+ 
+ type Usage = { month: string; used: number; limit: number; platform_providers: string[] };
+ 
+ /** Platforma kaliti bilan bepul oylik limit (faqat platforma kaliti sozlangan bo'lsa ko'rinadi). */
+ export default function QuotaMeter() {
+-  const { t } = useI18n();
++  const { t, lang } = useI18n();
+   const [u, setU] = useState<Usage | null>(null);
+   useEffect(() => {
+     apiFetch<Usage>("/usage").then(setU).catch(() => {});
+@@ -17,10 +18,10 @@ export default function QuotaMeter() {
+   const pct = Math.min(100, (u.used / Math.max(1, u.limit)) * 100);
+   return (
+     <div className="msg-in mb-8 rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
+-      <div className="flex items-baseline justify-between text-sm">
++      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
+         <span className="font-medium">{t("settings.quota")}</span>
+         <span className="tabular-nums text-neutral-400">
+-          {u.used} / {u.limit} {t("settings.requests")} · {u.month}
++          {u.used} / {u.limit} {t("settings.requests")} · {formatDate(u.month, lang, "month")}
+         </span>
+       </div>
+       <div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800" role="meter" aria-valuenow={u.used} aria-valuemax={u.limit}>
 diff --git a/frontend/src/components/settings/UsageTab.tsx b/frontend/src/components/settings/UsageTab.tsx
 index 0e4ce07..0cbcaf9 100644
 --- a/frontend/src/components/settings/UsageTab.tsx
