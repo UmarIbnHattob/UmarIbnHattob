@@ -9,6 +9,7 @@ import { colorOf, PROVIDER_LABELS } from "@/lib/providers";
 import { useAuth } from "@/components/AuthGate";
 import { btnCls, inputCls, Section, useToast } from "@/components/settings/ui";
 import QuotaMeter from "@/components/settings/QuotaMeter";
+import ProvidersTab from "@/components/settings/ProvidersTab";
 
 type KeyStatus = { provider: Provider; configured: boolean; last4: string | null; platform_available: boolean };
 
@@ -96,6 +97,8 @@ export default function KeysTab() {
           </div>
         ))}
       </Section>
+      {/* Qolgan barcha provayderlar (OpenAI, OpenRouter, Groq, lokal…) shu sahifaning o'zida */}
+      <ProvidersTab />
     </>
   );
 }

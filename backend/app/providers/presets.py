@@ -6,7 +6,7 @@ PRESETS = {
     "groq": {"name": "Groq", "base_url": "https://api.groq.com/openai/v1", "needs_key": True, "local": False,
              "key_url": "https://console.groq.com/keys", "note": "Juda tez, bepul darajasi bor. Ovozni matnga (Whisper) ham.", "stt_model": "whisper-large-v3-turbo"},
     "openai": {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "needs_key": True, "local": False,
-               "key_url": "https://platform.openai.com/api-keys", "note": "GPT modellar, Whisper.", "stt_model": "whisper-1"},
+               "key_url": "https://platform.openai.com/api-keys", "note": "ChatGPT modellari: GPT-5, GPT-4.1, o3/o4 va Codex (kod yozish) modellari. Ovoz uchun Whisper. Kalit ChatGPT Plus obunasidan alohida (pullik API).", "stt_model": "whisper-1"},
     "mistral": {"name": "Mistral", "base_url": "https://api.mistral.ai/v1", "needs_key": True, "local": False,
                 "key_url": "https://console.mistral.ai/api-keys", "note": "Mistral va Codestral."},
     "xai": {"name": "xAI (Grok)", "base_url": "https://api.x.ai/v1", "needs_key": True, "local": False,

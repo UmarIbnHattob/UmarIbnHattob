@@ -27,7 +27,8 @@ ko'p foydalanuvchi (login), sozlamalar (mavzu, til uz/en/ru, shaxsiy ko'rsatmala
 backend/   FastAPI + SQLAlchemy 2 + PostgreSQL + Alembic (Python 3.13/3.14)
   app/main.py            routerlarni ulaydi
   app/routers/           auth, chat (SSE oqim), keys, me (profil/sozlamalar/eksport/statistika),
-                         media (rasm), voice (ovoz->matn), agent (asbob chaqiruvli qadam), providers (custom)
+                         media (rasm), voice (ovoz->matn), agent (asbob chaqiruvli qadam), providers (custom;
+                         UI da "API kalitlar" bo'limida). OpenAI Codex/-pro modellar Responses API orqali
   app/providers/         anthropic.py (RASMIY Anthropic SDK), deepseek.py, gemini.py, openai_compat.py,
                          registry.py (modellar ro'yxati), router_auto.py (Auto model tanlash)
   app/agent/             tools.py (asbob sxemalari), adapters.py (provayder formatlari)

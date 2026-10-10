@@ -9,7 +9,7 @@ import { btnCls, btnGhostCls, inputCls, Section, useToast } from "@/components/s
 type Preset = { name: string; base_url: string; needs_key: boolean; local: boolean; key_url: string; note: string };
 type Connected = { id: string; kind: string; name: string; base_url: string; has_key: boolean; model_count: number; free_count: number; local: boolean };
 
-const ORDER = ["openrouter", "groq", "openai", "mistral", "xai", "together", "ollama", "lmstudio", "custom"];
+const ORDER = ["openai", "openrouter", "groq", "mistral", "xai", "together", "ollama", "lmstudio", "custom"];
 
 export default function ProvidersTab() {
   const { t } = useI18n();
@@ -130,7 +130,9 @@ export default function ProvidersTab() {
 
   return (
     <>
-      <p className="mb-6 text-sm text-neutral-400">{t("prov.desc")}</p>
+      <h2 id="providers" className="mb-1 scroll-mt-6 text-base font-semibold">{t("prov.moreTitle")}</h2>
+      <p className="mb-3 text-sm text-neutral-400">{t("prov.desc")}</p>
+      <p className="mb-6 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 text-xs leading-relaxed text-neutral-300">{t("prov.howto")}</p>
       {list.length > 0 && (
         <Section title={t("prov.yours")}>
           {list.map((c) => (
