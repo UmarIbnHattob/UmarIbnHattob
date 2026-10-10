@@ -155,6 +155,130 @@ index 0000000..0b0690c
 +  }
 +  return d.toLocaleDateString(lang, OPTIONS[style]);
 +}
+diff --git a/frontend/src/lib/i18n.tsx b/frontend/src/lib/i18n.tsx
+index 4cce98b..37c9eab 100644
+--- a/frontend/src/lib/i18n.tsx
++++ b/frontend/src/lib/i18n.tsx
+@@ -11,6 +11,39 @@ export const LANGS: { id: Lang; label: string; flag: string }[] = [
+ ];
+ 
+ const uz = {
++  // settings-ui
++  "err.network": "Server bilan aloqa yo‘q. Internet aloqasini tekshirib, qayta urinib ko‘ring.",
++  "err.server": "Server xatosi ({n}). Birozdan so‘ng qayta urinib ko‘ring.",
++  "err.tooShort": "{field}: kamida {n} belgi bo‘lishi kerak.", "err.tooLong": "{field}: ko‘pi bilan {n} belgi bo‘lishi mumkin.",
++  "err.tooMany": "{field}: juda ko‘p (ko‘pi bilan {n} ta).", "err.missing": "{field}: to‘ldirilishi shart.",
++  "err.invalid": "{field}: noto‘g‘ri qiymat.",
++  "field.key": "API kalit", "field.content": "Xabar", "field.prompt": "Tavsif (prompt)", "field.name": "Nomi", "field.title": "Sarlavha",
++  "field.password": "Parol", "field.displayName": "To‘liq ism", "field.nickname": "Taxallus", "field.email": "Email",
++  "field.baseUrl": "Manzil (base URL)", "field.folder": "Papka nomi", "field.messages": "Xabarlar", "field.value": "Qiymat",
++  "notFound.title": "Sahifa topilmadi", "notFound.text": "Bu manzilda sahifa yo‘q yoki u boshqa joyga ko‘chirilgan.",
++  "notFound.back": "Chatga qaytish", "menu.account": "Hisob menyusi",
++  "model.noResults": "Hech narsa topilmadi", "model.capped": "{shown} / {total} ta ko‘rsatildi — qidiruvni aniqlashtiring",
++  "model.quota": "limit tugadi",
++  "model.noKeyHint": "Bu model uchun API kalit yo‘q. Uni Sozlamalar → API kalitlar bo‘limida kiriting.",
++  "model.quotaHint": "Bu oy uchun bepul limit tugadi. O‘z API kalitingizni kiriting yoki keyingi oyni kuting.",
++  "settings.unsaved": "Saqlanmagan o‘zgarishlar bor",
++  "keys.confirmDelete": "Kalit o‘chirilsinmi?", "keys.deleted": "Kalit o‘chirildi", "keys.limitReached": "Bepul limit tugadi",
++  "prov.kind.ollama": "Ollama (lokal)", "prov.kind.lmstudio": "LM Studio (lokal)", "prov.kind.custom": "Boshqa (OpenAI-mos)",
++  "prov.note.openrouter": "300+ model bitta kalit bilan (Claude, GPT, Llama, Qwen, ...). :free modellar bepul.",
++  "prov.note.groq": "Juda tez, bepul darajasi bor. Ovozni matnga (Whisper) ham.",
++  "prov.note.openai": "ChatGPT modellari: GPT-5, GPT-4.1, o3/o4 va Codex (kod yozish) modellari. Ovoz uchun Whisper. Kalit ChatGPT Plus obunasidan alohida (pullik API).",
++  "prov.note.mistral": "Mistral va Codestral.", "prov.note.xai": "Grok modellar.", "prov.note.together": "Ochiq modellar (Llama, Qwen, DeepSeek).",
++  "prov.note.ollama": "Kompyuteringizdagi bepul modellar. Internet va kalit kerak emas.",
++  "prov.note.lmstudio": "Lokal modellar, qulay grafik ilova.", "prov.note.custom": "Istalgan OpenAI-mos manzil (vLLM, LocalAI, ...).",
++  "prov.optional": "ixtiyoriy", "prov.download": "Yuklab olish", "prov.edit": "Tahrirlash",
++  "prov.newKey": "Yangi API kalit (o‘zgartirmaslik uchun bo‘sh qoldiring)",
++  "prov.confirmDelete": "Provayder va uning kaliti o‘chirilsinmi?", "prov.deleted": "Provayder o‘chirildi",
++  "prov.addedWith": "Provayder qo‘shildi: {models}",
++  "prov.modelsN.one": "{n} ta model", "prov.modelsN.few": "{n} ta model", "prov.modelsN.many": "{n} ta model", "prov.modelsN.other": "{n} ta model",
++  "prov.freeN.one": "{n} ta bepul", "prov.freeN.few": "{n} ta bepul", "prov.freeN.many": "{n} ta bepul", "prov.freeN.other": "{n} ta bepul",
++  "privacy.sessionExpired": "Sessiya tugagan. Qaytadan kiring.", "privacy.exported": "Fayl yuklab olindi",
++  "media.loadMore": "Ko‘proq yuklash", "media.confirmDelete": "Rasm o‘chirilsinmi?", "media.deleted": "Rasm o‘chirildi",
++  "media.view": "Rasmni kattalashtirish", "media.shortcut": "{mod}+Enter — yaratish",
+   // umumiy
+   "common.save": "Saqlash", "common.saved": "Saqlandi", "common.cancel": "Bekor qilish", "common.delete": "O‘chirish",
+   "common.close": "Yopish", "common.loading": "Yuklanmoqda…", "common.soon": "Tez orada", "common.new": "Yangi",
+@@ -189,6 +222,39 @@ export type TKey = keyof typeof uz;
+ type Dict = Partial<Record<TKey, string>>;
+ 
+ const en: Dict = {
++  // settings-ui
++  "err.network": "Can’t reach the server. Check your internet connection and try again.",
++  "err.server": "Server error ({n}). Please try again in a moment.",
++  "err.tooShort": "{field}: must be at least {n} characters.", "err.tooLong": "{field}: must be at most {n} characters.",
++  "err.tooMany": "{field}: too many items (at most {n}).", "err.missing": "{field}: this field is required.",
++  "err.invalid": "{field}: invalid value.",
++  "field.key": "API key", "field.content": "Message", "field.prompt": "Prompt", "field.name": "Name", "field.title": "Title",
++  "field.password": "Password", "field.displayName": "Full name", "field.nickname": "Nickname", "field.email": "Email",
++  "field.baseUrl": "Base URL", "field.folder": "Folder name", "field.messages": "Messages", "field.value": "Value",
++  "notFound.title": "Page not found", "notFound.text": "There is no page at this address, or it has moved.",
++  "notFound.back": "Back to chat", "menu.account": "Account menu",
++  "model.noResults": "Nothing found", "model.capped": "{shown} of {total} shown — refine the search",
++  "model.quota": "limit reached",
++  "model.noKeyHint": "There is no API key for this model. Add one in Settings → API keys.",
++  "model.quotaHint": "This month’s free limit is used up. Add your own API key or wait for next month.",
++  "settings.unsaved": "Unsaved changes",
++  "keys.confirmDelete": "Delete this key?", "keys.deleted": "Key deleted", "keys.limitReached": "Free limit reached",
++  "prov.kind.ollama": "Ollama (local)", "prov.kind.lmstudio": "LM Studio (local)", "prov.kind.custom": "Other (OpenAI-compatible)",
++  "prov.note.openrouter": "300+ models with one key (Claude, GPT, Llama, Qwen, ...). :free models cost nothing.",
++  "prov.note.groq": "Very fast, with a free tier. Also speech-to-text (Whisper).",
++  "prov.note.openai": "ChatGPT models: GPT-5, GPT-4.1, o3/o4 and Codex (coding) models. Whisper for voice. The key is separate from a ChatGPT Plus subscription (paid API).",
++  "prov.note.mistral": "Mistral and Codestral.", "prov.note.xai": "Grok models.", "prov.note.together": "Open models (Llama, Qwen, DeepSeek).",
++  "prov.note.ollama": "Free models on your computer. No internet or key needed.",
++  "prov.note.lmstudio": "Local models in a friendly desktop app.", "prov.note.custom": "Any OpenAI-compatible endpoint (vLLM, LocalAI, ...).",
++  "prov.optional": "optional", "prov.download": "Download", "prov.edit": "Edit",
++  "prov.newKey": "New API key (leave empty to keep the current one)",
++  "prov.confirmDelete": "Delete this provider and its key?", "prov.deleted": "Provider deleted",
++  "prov.addedWith": "Provider added: {models}",
++  "prov.modelsN.one": "{n} model", "prov.modelsN.other": "{n} models",
++  "prov.freeN.one": "{n} free", "prov.freeN.other": "{n} free",
++  "privacy.sessionExpired": "Your session has expired. Please sign in again.", "privacy.exported": "File downloaded",
++  "media.loadMore": "Load more", "media.confirmDelete": "Delete this image?", "media.deleted": "Image deleted",
++  "media.view": "View full size", "media.shortcut": "{mod}+Enter — generate",
+   "common.save": "Save", "common.saved": "Saved", "common.cancel": "Cancel", "common.delete": "Delete", "common.close": "Close",
+   "common.loading": "Loading…", "common.soon": "Coming soon", "common.new": "New", "common.confirm": "Confirm", "common.on": "On", "common.off": "Off",
+   "nav.chat": "Chat", "nav.agent": "Agent", "nav.media": "Media Studio", "nav.settings": "Settings",
+@@ -328,6 +394,39 @@ const en: Dict = {
+ };
+ 
+ const ru: Dict = {
++  // settings-ui
++  "err.network": "Нет связи с сервером. Проверьте подключение к интернету и попробуйте снова.",
++  "err.server": "Ошибка сервера ({n}). Попробуйте ещё раз чуть позже.",
++  "err.tooShort": "{field}: не менее {n} символов.", "err.tooLong": "{field}: не более {n} символов.",
++  "err.tooMany": "{field}: слишком много (не более {n}).", "err.missing": "{field}: обязательное поле.",
++  "err.invalid": "{field}: неверное значение.",
++  "field.key": "API-ключ", "field.content": "Сообщение", "field.prompt": "Описание (prompt)", "field.name": "Название", "field.title": "Заголовок",
++  "field.password": "Пароль", "field.displayName": "Полное имя", "field.nickname": "Имя для ИИ", "field.email": "Email",
++  "field.baseUrl": "Адрес (base URL)", "field.folder": "Имя папки", "field.messages": "Сообщения", "field.value": "Значение",
++  "notFound.title": "Страница не найдена", "notFound.text": "По этому адресу нет страницы, или она была перемещена.",
++  "notFound.back": "Вернуться в чат", "menu.account": "Меню аккаунта",
++  "model.noResults": "Ничего не найдено", "model.capped": "Показано {shown} из {total} — уточните поиск",
++  "model.quota": "лимит исчерпан",
++  "model.noKeyHint": "Для этой модели нет API-ключа. Добавьте его в Настройки → API-ключи.",
++  "model.quotaHint": "Бесплатный лимит на этот месяц исчерпан. Добавьте свой API-ключ или дождитесь следующего месяца.",
++  "settings.unsaved": "Есть несохранённые изменения",
++  "keys.confirmDelete": "Удалить ключ?", "keys.deleted": "Ключ удалён", "keys.limitReached": "Бесплатный лимит исчерпан",
++  "prov.kind.ollama": "Ollama (локально)", "prov.kind.lmstudio": "LM Studio (локально)", "prov.kind.custom": "Другой (OpenAI-совместимый)",
++  "prov.note.openrouter": "300+ моделей по одному ключу (Claude, GPT, Llama, Qwen, ...). Модели :free бесплатны.",
++  "prov.note.groq": "Очень быстрый, есть бесплатный тариф. Также распознавание речи (Whisper).",
++  "prov.note.openai": "Модели ChatGPT: GPT-5, GPT-4.1, o3/o4 и Codex (для кода). Whisper для голоса. Ключ не связан с подпиской ChatGPT Plus (платный API).",
++  "prov.note.mistral": "Mistral и Codestral.", "prov.note.xai": "Модели Grok.", "prov.note.together": "Открытые модели (Llama, Qwen, DeepSeek).",
++  "prov.note.ollama": "Бесплатные модели на вашем компьютере. Интернет и ключ не нужны.",
++  "prov.note.lmstudio": "Локальные модели в удобном приложении.", "prov.note.custom": "Любой OpenAI-совместимый адрес (vLLM, LocalAI, ...).",
++  "prov.optional": "необязательно", "prov.download": "Скачать", "prov.edit": "Изменить",
++  "prov.newKey": "Новый API-ключ (оставьте пустым, чтобы не менять)",
++  "prov.confirmDelete": "Удалить провайдера и его ключ?", "prov.deleted": "Провайдер удалён",
++  "prov.addedWith": "Провайдер добавлен: {models}",
++  "prov.modelsN.one": "{n} модель", "prov.modelsN.few": "{n} модели", "prov.modelsN.many": "{n} моделей", "prov.modelsN.other": "{n} модели",
++  "prov.freeN.one": "{n} бесплатная", "prov.freeN.few": "{n} бесплатные", "prov.freeN.many": "{n} бесплатных", "prov.freeN.other": "{n} бесплатных",
++  "privacy.sessionExpired": "Сессия истекла. Войдите снова.", "privacy.exported": "Файл скачан",
++  "media.loadMore": "Загрузить ещё", "media.confirmDelete": "Удалить изображение?", "media.deleted": "Изображение удалено",
++  "media.view": "Открыть в полном размере", "media.shortcut": "{mod}+Enter — создать",
+   "common.save": "Сохранить", "common.saved": "Сохранено", "common.cancel": "Отмена", "common.delete": "Удалить", "common.close": "Закрыть",
+   "common.loading": "Загрузка…", "common.soon": "Скоро", "common.new": "Новое", "common.confirm": "Подтвердить", "common.on": "Вкл", "common.off": "Выкл",
+   "nav.chat": "Чат", "nav.agent": "Агент", "nav.media": "Медиа-студия", "nav.settings": "Настройки",
 diff --git a/frontend/src/lib/me.ts b/frontend/src/lib/me.ts
 index 04a09c2..c11129b 100644
 --- a/frontend/src/lib/me.ts
@@ -192,3 +316,69 @@ index 04a09c2..c11129b 100644
  
  export const API_KEY_LINKS: Record<Provider, { label: string; url: string }> = {
    anthropic: { label: "Claude (Anthropic Console)", url: "https://console.anthropic.com/settings/keys" },
+diff --git a/frontend/src/lib/providers.ts b/frontend/src/lib/providers.ts
+index 9d758d7..b394752 100644
+--- a/frontend/src/lib/providers.ts
++++ b/frontend/src/lib/providers.ts
+@@ -2,6 +2,8 @@
+  * Provayder ranglari (CSS o'zgaruvchilari, globals.css): har bir mavzu uchun alohida tanlangan
+  * va rang-ko'rlik tekshiruvidan o'tgan qadamlar. Chat, grafik va logotip bir xil rangni ishlatadi.
+  */
++import { translate, type Lang, type TKey } from "@/lib/i18n";
++
+ export const PROVIDERS = ["anthropic", "deepseek", "gemini"] as const;
+ export const PROVIDER_LABELS: Record<string, string> = { anthropic: "Claude", deepseek: "Deepseek", gemini: "Gemini" };
+ export const PROVIDER_COLORS: Record<string, string> = {
+@@ -11,3 +13,52 @@ export const PROVIDER_COLORS: Record<string, string> = {
+ };
+ 
+ export const colorOf = (provider?: string | null) => (provider && PROVIDER_COLORS[provider]) || "rgb(var(--n-400))";
++
++/** Grafikdagi boshqa qatorlar (Whisper, OpenRouter, Groq…) uchun qo'shimcha ranglar (globals.css: --s-1…--s-5). */
++const EXTRA_COLORS = ["var(--s-1)", "var(--s-2)", "var(--s-3)", "var(--s-4)", "var(--s-5)"];
++
++/**
++ * Har bir qatorga rang: o'rnatilgan provayderlar o'z rangida, qolganlari qo'shimcha ranglardan tartib bilan
++ * (aylantirilmaydi: ular tugasa — betaraf kulrang). Rang har doim nom yonida (legenda, maslahat) ko'rsatiladi.
++ */
++export function seriesColors(keys: readonly string[]): Record<string, string> {
++  const out: Record<string, string> = {};
++  let i = 0;
++  for (const k of keys) out[k] = PROVIDER_COLORS[k] ?? EXTRA_COLORS[i++] ?? "rgb(var(--n-500))";
++  return out;
++}
++
++type T = (key: TKey, vars?: Record<string, string | number>) => string;
++
++/** Son bilan so'z: "1 model / 2 models", "1 модель / 2 модели / 5 моделей". i18n da `<base>.one/.few/.many/.other` bor. */
++export function plural(t: T, lang: Lang, base: "prov.modelsN" | "prov.freeN", n: number): string {
++  let cat = "other";
++  try {
++    cat = new Intl.PluralRules(lang).select(n);
++  } catch {
++    /* e'tiborsiz */
++  }
++  if (cat !== "one" && cat !== "few" && cat !== "many") cat = "other";
++  return t(`${base}.${cat}` as TKey, { n });
++}
++
++// Backend preset nomlari va izohlari o'zbekcha keladi: interfeysda tur (kind) bo'yicha tarjima qilinadi
++const KIND_NAMES: Record<string, TKey> = { ollama: "prov.kind.ollama", lmstudio: "prov.kind.lmstudio", custom: "prov.kind.custom" };
++const KIND_NOTES: Record<string, TKey> = {
++  openrouter: "prov.note.openrouter", groq: "prov.note.groq", openai: "prov.note.openai", mistral: "prov.note.mistral",
++  xai: "prov.note.xai", together: "prov.note.together", ollama: "prov.note.ollama", lmstudio: "prov.note.lmstudio",
++  custom: "prov.note.custom",
++};
++
++/** Preset nomi va izohi joriy tilda (tarjimasi bo'lmasa — serverdagi matn). */
++export const presetName = (t: T, kind: string, serverName: string) => (KIND_NAMES[kind] ? t(KIND_NAMES[kind]) : serverName);
++export const presetNote = (t: T, kind: string, serverNote: string) => (KIND_NOTES[kind] ? t(KIND_NOTES[kind]) : serverNote);
++
++/**
++ * Ulangan provayder nomi: foydalanuvchi nom bermagan bo'lsa bazada preset nomi (o'zbekcha) saqlangan —
++ * uni joriy tilga almashtiramiz; foydalanuvchi o'zi yozgan nom o'zgarishsiz qoladi.
++ */
++export function providerName(t: T, kind: string, name: string): string {
++  const key = KIND_NAMES[kind];
++  return key && name === translate("uz", key) ? t(key) : name;
++}
