@@ -3,12 +3,6 @@
 > Bu fayl har bir yangi Claude Code chatida avtomatik o'qiladi. Loyiha egasi: **Umar** (GitHub: UmarIbnHattob).
 > Yangi chatda ishni shu yerdan davom ettiring.
 
-## ⚠️ DAVOM ETTIRISH (ochiq ish bor)
-
-Oldingi sessiya limit tufayli to'xtadi. **Avval `handoff/HANDOFF.md` ni to'liq o'qing** — u yerda nima qilingani,
-nima qolgani (chat-ui va settings-ui tuzatishlari, review, yakuniy E2E sinov), sinov muhiti (`tools/e2e/`) va
-saboqlar yozilgan. Ish tugagach bu bo'limni o'chiring.
-
 ## Foydalanuvchi bilan ishlash qoidalari (MUHIM)
 
 - **Barcha izohlar va javoblar o'zbek tilida** (lotin). Kod, fayl nomlari, commit xabarlari — ingliz tilida.
@@ -67,6 +61,9 @@ cd backend && .venv/bin/pytest -q          # omniai_test bazasi kerak (testlar j
 cd desktop && npm test                     # fayl asboblari xavfsizligi
 cd frontend && npx tsc --noEmit && npx next lint && npm run build
 ```
+To'liq E2E (haqiqiy API kalitlarisiz, soxta AI provayderlar bilan): `tools/e2e/browser/README.md` — brauzer
+(Playwright) va Electron sinovlari. Topilmalar tarixi: `docs/e2e_findings_2026-10.json`, backend API o'zgarishlari:
+`docs/api_changes.md`.
 Bulut sessiyada Postgres: `su postgres -c "pg_ctl -D /tmp/pgtest/data -o '-k /tmp/pgtest' start"` (initdb qilingan
 bo'lsa). Brauzer sinovlari: Playwright (`/opt/pw-browsers/chromium`), Electron: `xvfb-run` + `--disable-gpu`.
 **Diqqat:** `pkill -f mock_server` kabi buyruq o'z qobig'ini ham o'ldiradi — `pkill -f "[m]ock_server"` yozing.
@@ -92,9 +89,13 @@ bo'lsa). Brauzer sinovlari: Playwright (`/opt/pw-browsers/chromium`), Electron: 
 - Server xato xabarlarini ham tarjima qilish (hozir faqat o'zbekcha).
 - Desktop ilovani imzolash (Windows/macOS sertifikatlari), avtomatik yangilanish.
 - Haqiqiy API kalitlari bilan to'liq sinov (Claude/Gemini tool-calling, Gemini rasm, ovoz).
+- (Ixtiyoriy) Bitta qurilmadan chiqishda tokenni serverda ham bekor qilish (`jti` + bekor qilingan tokenlar jadvali).
+  Hozir 3-qarorga ko'ra: oddiy chiqish cookie'ni o'chiradi, "Barcha qurilmalardan chiqish" esa barcha tokenlarni.
 
 ## Ish tarixi (qisqa)
 
 Phase 1–5 (asos, baza, chat, canvas, media) → login → kod ko'rib chiqish + animatsiyalar → deploy (Docker+Caddy)
 → desktop + agent + ovoz + platforma kaliti → sozlamalar/menyu/mavzular/tillar → Auto model, 100+ model
-(OpenRouter/OpenAI-mos/lokal), sayt yaratish ustasi. Batafsil: `git log`.
+(OpenRouter/OpenAI-mos/lokal), sayt yaratish ustasi → to'liq E2E sinov kampaniyasi (141 topilma) va ikki bosqichli
+tuzatish: backend (kvota siyosati, kursorli sahifalash, ulanish paytidagi SSRF himoyasi), agent/desktop, responsive
+layout, chat/sozlamalar/media UI, tarjimalar, kirish imkoniyati (a11y). Batafsil: `git log`.

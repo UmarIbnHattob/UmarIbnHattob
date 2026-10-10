@@ -1,0 +1,13 @@
+{
+  "name": "omniai-e2e-browser",
+  "private": true,
+  "type": "module",
+  "description": "OmniAI brauzer va Electron E2E sinovlari (soxta AI provayderlar bilan)",
+  "scripts": {
+    "test": "for t in layout chat chat2 canvas settings media_auth voice model_restore; do node $t.mjs || exit 1; done",
+    "test:electron": "xvfb-run -a node electron_agent.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.56.1"
+  }
+}
