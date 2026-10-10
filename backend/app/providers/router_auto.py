@@ -50,8 +50,25 @@ _IMAGE = re.compile(
     r"|\brasm(?:ini|ni)?\s+qil",
     re.I,
 )
-# Jadval/grafik "chizish" — matn (markdown/kod) bilan javob beriladi, rasm modeli emas
-_NOT_IMAGE = re.compile(r"\b(?:jadval|grafik|diagramm|chart|graph|plot|table|таблиц|график|диаграмм|схем)\w*", re.I)
+# Jadval/grafik/diagramma "chizish" — matn (markdown/kod) bilan javob beriladi, rasm modeli emas. Faqat shu so'z
+# chizilayotgan narsaning O'ZI bo'lsa: "jadval chizib ber", "draw a bar chart", "нарисуй график продаж".
+# "mushukni stol ustida chizib ber, grafik uslubda", "draw a cat sitting on a table" — rasm.
+_CHART = (
+    r"(?:jadval\w*|grafi[kg]\w*|diagramm\w*|charts?|graphs?|plots?|tables?|diagrams?|"
+    r"таблиц\w*|график\w*|диаграмм\w*|схем\w*)\b"
+)
+# Fe'l bilan obyekt orasida faqat aniqlovchilar (a, me, bar, simple...); predlogdan keyingisi boshqa narsa ("on a table")
+_FILLER = (
+    r"(?:(?!(?:on|at|in|into|onto|under|near|by|with|beside|behind|over|above|below|of|from|next|"
+    r"на|в|во|под|над|у|за|с|со|около|возле|рядом|перед)\b)\w+\s+){0,3}"
+)
+_NOT_IMAGE = re.compile(
+    # inglizcha/ruscha: obyekt fe'ldan keyin ("draw me a bar chart", "нарисуй круговую диаграмму")
+    rf"(?:\bdraw\b|\bнарис\w*|\bизобрази\w*)\s+{_FILLER}{_CHART}"
+    # o'zbekcha: obyekt fe'ldan oldin ("jadval chizib ber", "sotuv grafigini chiz"); "grafik uslubda" — uslub, obyekt emas
+    rf"|\b{_CHART}\s+(?:(?!uslub|stil)[\w'‘’ʻʼ`]+\s+)?chiz(?!iq|g\W?ich|ma(?!q))",
+    re.I,
+)
 
 _REASON = re.compile(
     r"\b(?:isbotla|matematik|tenglama|mantiq|strategiya|tahlil\s+qil|rejala|reja\s+tuz|qaror|hisobla|"

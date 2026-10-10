@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 
 from app.providers import openai_compat
 
-BASE_URL = "https://api.deepseek.com"
+BASE_URL = openai_compat.DEEPSEEK_BASE
 
 
 async def stream_chat(api_key: str, model: str, messages: list[dict], system: str | None = None) -> AsyncIterator[str]:

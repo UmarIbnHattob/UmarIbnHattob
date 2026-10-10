@@ -1,5 +1,8 @@
+import httpx
+import pytest
+
 from app.providers import gemini_image
-from app.providers.base import ProviderError
+from app.providers.base import EmptyReply, ProviderError
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"1" * 30
 
@@ -43,11 +46,37 @@ def test_failed_image_refunds_platform_quota(client, monkeypatch):
     assert client.get("/api/usage").json()["used"] == 0
     assert client.get("/api/usage/stats").json()["by_kind"] == {}
 
+    # Model javob berdi, lekin rasm chiqmadi (rad etdi): provayder hisoblagan — limit qaytarilmaydi
+    async def refused(api_key, model, prompt):
+        raise EmptyReply("Model rasm qaytarmadi (SAFETY).")
+    monkeypatch.setattr(gemini_image, "generate_image", refused)
+    r = client.post("/api/media/images", json=body)
+    assert r.status_code == 502 and "SAFETY" in r.json()["detail"]
+    assert client.get("/api/usage").json()["used"] == 1
+    assert client.get("/api/usage/stats").json()["by_kind"] == {}
+
     async def ok(api_key, model, prompt):
         return "image/png", PNG
     monkeypatch.setattr(gemini_image, "generate_image", ok)
     assert client.post("/api/media/images", json=body).status_code == 201
-    assert client.get("/api/usage").json()["used"] == 1
+    assert client.get("/api/usage").json()["used"] == 2
+
+
+@pytest.mark.anyio
+async def test_no_image_in_200_reply_is_empty_reply(monkeypatch):
+    """Gemini 200 qaytarib, rasm bermasa (blockReason yoki matn) — EmptyReply (limit qaytarilmaydi)."""
+    async def fake_post(self, url, **kw):
+        return httpx.Response(200, json={"promptFeedback": {"blockReason": "SAFETY"}}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    with pytest.raises(EmptyReply, match="SAFETY"):
+        await gemini_image.generate_image("k", "gemini-2.5-flash-image", "x")
+
+    async def fail(self, url, **kw):
+        return httpx.Response(500, json={}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(httpx.AsyncClient, "post", fail)
+    with pytest.raises(ProviderError) as exc:
+        await gemini_image.generate_image("k", "gemini-2.5-flash-image", "x")
+    assert not isinstance(exc.value, EmptyReply)
 
 
 def test_media_pagination(client):
@@ -65,6 +94,18 @@ def test_media_pagination(client):
     assert [m["prompt"] for m in page] == ["r2", "r1"]
     assert len(client.get("/api/media").json()) == 5
     assert client.get("/api/media?limit=500").status_code == 422
+    # Bir xil created_at li rasmlar: (vaqt, id) kursori bilan hech biri tushib qolmaydi
+    with engine.begin() as c:
+        c.execute(text("UPDATE media_items SET created_at = timestamptz '2026-01-01 00:00:00+00' WHERE user_id = :u"), {"u": uid})
+    seen, params = [], {"limit": 2}
+    while True:
+        page = client.get("/api/media", params=params).json()
+        seen += [m["id"] for m in page]
+        if len(page) < 2:
+            break
+        params = {"limit": 2, "before": page[-1]["created_at"], "before_id": page[-1]["id"]}
+    assert len(seen) == 5 and len(set(seen)) == 5
+    assert client.get("/api/media", params={"before_id": seen[0]}).status_code == 422
 
 
 def test_file_cache_policy(client, monkeypatch):

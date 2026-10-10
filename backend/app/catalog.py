@@ -11,10 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import quota
-from app.config import settings
 from app.crypto import decrypt
 from app.models import ApiKey, CustomProvider, Provider, User
-from app.netguard import UnsafeURL, check_url
+from app.netguard import UnsafeURL, check_url_async
 from app.providers import openai_compat
 from app.providers.presets import PRESETS
 from app.providers.registry import MODELS, STREAMERS
@@ -85,7 +84,7 @@ def _custom(db: Session, user: User, ref: str) -> tuple[CustomProvider, dict]:
     return cp, meta
 
 
-def resolve(db: Session, user: User, ref: str, reserve: bool = True) -> Resolved:
+async def resolve(db: Session, user: User, ref: str, reserve: bool = True) -> Resolved:
     """Modelni chaqirishga tayyorlaydi.
 
     Platforma kaliti ishlatilsa oylik limitdan bitta so'rov band qilinadi. So'rovni avval tekshirish kerak bo'lsa
@@ -93,13 +92,13 @@ def resolve(db: Session, user: User, ref: str, reserve: bool = True) -> Resolved
     """
     if ref.startswith(CUSTOM_PREFIX):
         cp, meta = _custom(db, user, ref)
-        base = cp.base_url
-        if not settings.allow_local_providers:
-            # DNS keyin ichki manzilga o'zgartirilgan bo'lishi mumkin (DNS rebinding): har so'rovda qayta tekshiramiz
-            try:
-                check_url(base)
-            except UnsafeURL as exc:
-                raise HTTPException(400, f"{cp.name}: {exc}")
+        base, name = cp.base_url, cp.name
+        # Manzil ichki tarmoqqa o'zgarmaganmi (tushunarli 400 uchun; DNS alohida oqimda). Asosiy himoya ulanish
+        # paytida (netguard.http_client): bu tekshiruvdan keyin DNS o'zgartirilsa ham ichki manzilga ulanilmaydi.
+        try:
+            await check_url_async(base)
+        except UnsafeURL as exc:
+            raise HTTPException(400, f"{name}: {exc}")
         key = decrypt(cp.encrypted_key) if cp.encrypted_key else None
         label = f"{meta.get('label') or meta['id']}"
 

@@ -24,6 +24,13 @@ class ProviderError(Exception):
     """Foydalanuvchiga ko'rsatiladigan tushunarli xato."""
 
 
+class EmptyReply(ProviderError):
+    """Provayder 200 bilan javob berdi (so'rov hisoblangan), lekin foydali natija yo'q (masalan rasm chiqmadi).
+
+    Bepul limit qaytarilmaydi: aks holda rad etiladigan so'rovlar bilan platforma kalitini tekin ishlatish mumkin.
+    """
+
+
 def friendly_http_error(status: int, body: str) -> ProviderError:
     if status in (401, 403):
         return ProviderError("API kalit noto'g'ri yoki ruxsat yo'q. Settings sahifasida tekshiring.")

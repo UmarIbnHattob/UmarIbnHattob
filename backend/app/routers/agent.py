@@ -17,9 +17,9 @@ from app.deps import get_current_user
 from app.models import Provider, User
 from app.personalize import system_prompt
 from app.providers import gemini_image
-from app.providers.base import ProviderError
+from app.providers.base import EmptyReply, ProviderError
 from app.providers.router_auto import choose
-from app.quota import refund_on_error, resolve_key_info
+from app.quota import refund, refund_on_error, resolve_key_info
 from app.usage_log import record
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -116,7 +116,7 @@ async def agent_step(body: StepIn, db: Session = Depends(get_db), user: User = D
     if not ref.startswith(CUSTOM_PREFIX) and ref not in BUILTIN_AGENT:
         raise HTTPException(400, f"Bu model agent rejimini qo'llab-quvvatlamaydi: {ref}")
     # Avval hamma tekshiruv (limit yechilmaydi), keyin bepul limitdan bitta so'rov band qilinadi
-    res_model = resolve(db, user, ref, reserve=False)
+    res_model = await resolve(db, user, ref, reserve=False)
     if not res_model.tools:
         raise HTTPException(400, f"{res_model.label} asbob chaqira olmaydi (tool calling yo'q), agent rejimida ishlamaydi. Boshqa model tanlang.")
     fam = family(res_model.provider)
@@ -160,11 +160,11 @@ async def agent_image(body: ImageIn, db: Session = Depends(get_db), user: User =
     model = gemini_image.IMAGE_MODELS[0]["id"]
     user_id = user.id
     db.close()
-    with refund_on_error(user_id, platform):
-        try:
+    try:
+        with refund_on_error(user_id, platform):  # rasm chiqmasa (EmptyReply) limit qaytarilmaydi
             mime, data = await gemini_image.generate_image(api_key, model, body.prompt)
-        except ProviderError as exc:
-            raise HTTPException(502, str(exc))
+    except ProviderError as exc:
+        raise HTTPException(502, str(exc))
     record(user_id, "image", "gemini", model, platform)
     return {"mime": mime, "data": base64.b64encode(data).decode(), "model": model}
 
@@ -190,15 +190,20 @@ async def agent_expert(body: ExpertIn, db: Session = Depends(get_db), user: User
     picked = choose(kind, items)
     if picked is None:
         raise HTTPException(400, "Ekspert uchun boshqa model topilmadi.")
-    res_model = resolve(db, user, picked["id"])
+    res_model = await resolve(db, user, picked["id"])
     user_id = user.id
     db.close()
-    with refund_on_error(user_id, res_model.platform):
-        try:
-            answer = "".join([t async for t in res_model.stream([{"role": "user", "content": body.question}], EXPERT_SYSTEM[body.expertise])])
-        except ProviderError as exc:
-            raise HTTPException(502, str(exc))
-        if not answer.strip():
-            raise HTTPException(502, f"{res_model.label} bo'sh javob qaytardi.")
+    parts: list[str] = []
+    try:
+        async for t in res_model.stream([{"role": "user", "content": body.question}], EXPERT_SYSTEM[body.expertise]):
+            parts.append(t)
+    except ProviderError as exc:
+        # Bepul limit faqat provayder so'rovni bajarmagan bo'lsa (birinchi so'zdan oldin xato) qaytariladi
+        if res_model.platform and not parts and not isinstance(exc, EmptyReply):
+            refund(user_id)
+        raise HTTPException(502, str(exc))
+    answer = "".join(parts)
+    if not answer.strip():  # provayder javob berdi (so'rov hisoblangan): limit qaytarilmaydi
+        raise HTTPException(502, f"{res_model.label} bo'sh javob qaytardi.")
     record(user_id, "agent", res_model.provider, res_model.id, res_model.platform)
     return {"answer": answer, "model": res_model.label}

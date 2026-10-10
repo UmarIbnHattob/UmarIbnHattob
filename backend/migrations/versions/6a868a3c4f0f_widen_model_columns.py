@@ -24,11 +24,13 @@ def upgrade() -> None:
                     existing_nullable=True)
     op.alter_column('usage_events', 'model', existing_type=sa.String(length=100), type_=sa.String(length=300),
                     existing_nullable=False)
-    op.create_index('ix_conversations_user_updated', 'conversations', ['user_id', 'updated_at'], unique=False)
+    # Ba'zi muhitlarda indeks allaqachon yaratilgan: qayta yaratishda xato bermasin
+    op.create_index('ix_conversations_user_updated', 'conversations', ['user_id', 'updated_at'], unique=False,
+                    if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index('ix_conversations_user_updated', table_name='conversations')
+    op.drop_index('ix_conversations_user_updated', table_name='conversations', if_exists=True)
     op.alter_column('usage_events', 'model', existing_type=sa.String(length=300), type_=sa.String(length=100),
                     existing_nullable=False, postgresql_using='left(model, 100)')
     op.alter_column('messages', 'model', existing_type=sa.String(length=300), type_=sa.String(length=100),

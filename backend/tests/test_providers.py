@@ -271,8 +271,11 @@ def test_old_stored_non_chat_models_hidden_from_catalog(client, fake_net, monkey
     monkeypatch.setattr(settings, "allow_local_providers", True)
     pid = client.post("/api/providers", json={"kind": "groq", "api_key": "gsk-1234"}).json()["id"]
     with engine.begin() as c:  # filtr qo'shilishidan oldin saqlangan ro'yxat
-        c.execute(text("""UPDATE custom_providers SET models = '[{"id": "llama-3.3-70b-versatile"}, {"id": "whisper-large-v3-turbo"}]' WHERE id = :i"""), {"i": pid})
+        c.execute(text("""UPDATE custom_providers SET models = '[{"id": "llama-3.3-70b-versatile"}, {"id": "whisper-large-v3-turbo", "free": true}, {"id": "playai-tts"}]' WHERE id = :i"""), {"i": pid})
     ids = [m["id"] for m in client.get("/api/models").json() if m["source"] == "custom"]
     assert ids == [f"cp:{pid}:llama-3.3-70b-versatile"]
+    # Provayderlar ro'yxatidagi son ham faqat chat modellari (katalog bilan bir xil)
+    p = next(x for x in client.get("/api/providers").json() if x["id"] == pid)
+    assert p["model_count"] == 1 and p["free_count"] == 0
     assert not [m for m in client.get("/api/agent/models").json() if "whisper" in m["id"]]
 

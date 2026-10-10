@@ -13,7 +13,7 @@ from app.crypto import decrypt, encrypt
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import CustomProvider, User
-from app.netguard import UnsafeURL, check_url
+from app.netguard import UnsafeURL, check_url_async
 from app.providers import openai_compat
 from app.providers.base import ProviderError
 from app.providers.presets import PRESETS
@@ -39,10 +39,12 @@ class ProviderPatch(BaseModel):
 
 
 def _out(cp: CustomProvider) -> dict:
+    # Eski (filtrdan oldin saqlangan) ro'yxatlardagi Whisper/TTS va h.k. sanalmaydi: katalogdagi son bilan bir xil
+    chat = [m for m in cp.models or [] if openai_compat.is_chat_model(m["id"])]
     return {
         "id": str(cp.id), "kind": cp.kind, "name": cp.name, "base_url": cp.base_url,
-        "has_key": bool(cp.encrypted_key), "model_count": len(cp.models or []),
-        "free_count": sum(1 for m in cp.models or [] if m.get("free")),
+        "has_key": bool(cp.encrypted_key), "model_count": len(chat),
+        "free_count": sum(1 for m in chat if m.get("free")),
         "local": PRESETS.get(cp.kind, {}).get("local", False),
     }
 
@@ -102,7 +104,7 @@ async def add_provider(body: ProviderIn, db: Session = Depends(get_db), user: Us
     if not base:
         raise HTTPException(400, "Manzil (base URL) kiriting.")
     try:
-        base = check_url(base)
+        base = await check_url_async(base)  # DNS so'rovi event loop'ni to'xtatmaydi
     except UnsafeURL as exc:
         raise HTTPException(400, str(exc))
     key = (body.api_key or "").strip() or None
@@ -147,7 +149,7 @@ async def update_provider(pid: uuid.UUID, body: ProviderPatch, db: Session = Dep
             raise HTTPException(400, f"{preset['name']} uchun API kalit kerak.")
         base = cp.base_url
         try:
-            check_url(base)
+            await check_url_async(base)
         except UnsafeURL as exc:
             raise HTTPException(400, str(exc))
         db.close()
@@ -166,7 +168,7 @@ async def refresh_provider(pid: uuid.UUID, db: Session = Depends(get_db), user: 
     cp = _own(db, user, pid)
     base, key = cp.base_url, decrypt(cp.encrypted_key) if cp.encrypted_key else None
     try:
-        check_url(base)
+        await check_url_async(base)
     except UnsafeURL as exc:
         raise HTTPException(400, str(exc))
     models = await _fetch_models(base, key)

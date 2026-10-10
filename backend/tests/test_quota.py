@@ -81,3 +81,36 @@ def test_platform_flags_when_quota_exhausted(client, fake_llm, monkeypatch):
     assert ds["platform_available"] is False and ds["platform_exhausted"] is True
     gm = next(k for k in client.get("/api/keys").json() if k["provider"] == "gemini")
     assert gm["platform_available"] is False and gm["platform_exhausted"] is False  # platforma kaliti umuman yo'q
+
+
+def test_refund_on_error_policy(client, monkeypatch):
+    """Faqat bajarilmagan so'rov qaytariladi: bekor qilish va bo'sh (EmptyReply) javob qaytarilmaydi."""
+    import asyncio
+    import uuid
+
+    import pytest
+
+    from app.database import SessionLocal
+    from app.models import User
+    from app.providers.base import EmptyReply, ProviderError
+    from app.quota import refund_on_error, reserve
+
+    monkeypatch.setattr(settings, "free_monthly_requests", 10)
+    uid = uuid.UUID(client.get("/api/auth/me").json()["id"])
+
+    def run(exc: BaseException) -> int:
+        with SessionLocal() as db:
+            reserve(db, db.get(User, uid))
+        with pytest.raises(type(exc)):
+            with refund_on_error(uid, True):
+                raise exc
+        return client.get("/api/usage").json()["used"]
+
+    assert run(ProviderError("500")) == 0  # provayder xatosi: qaytarildi
+    assert run(RuntimeError("bizning xato")) == 0
+    assert run(asyncio.CancelledError()) == 1  # mijoz uzildi: provayder hisoblagan
+    assert run(GeneratorExit()) == 2
+    assert run(EmptyReply("rasm chiqmadi")) == 3
+    with refund_on_error(uid, False):  # o'z kaliti: hech narsa o'zgarmaydi
+        pass
+    assert client.get("/api/usage").json()["used"] == 3
