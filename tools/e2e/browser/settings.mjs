@@ -22,6 +22,21 @@ await trigger.click();
 const combo = page.getByRole("combobox", { name: "Model qidirish…" });
 check("picker: ochilganda qidiruvga fokus", await combo.evaluate((el) => el === document.activeElement));
 check("picker: listbox/option rollari", (await page.getByRole("listbox").count()) === 1 && (await page.getByRole("option").count()) > 3);
+// Ochiq ro'yxat keyingi bo'limlar ostida qolmasin: har bir variant markazida aynan o'sha variant turishi kerak
+const covered = async () => page.evaluate(() =>
+  [...document.querySelectorAll('[role="option"]')].filter((o) => {
+    const r = o.getBoundingClientRect();
+    if (r.bottom > innerHeight || r.height === 0) return false;
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !o.contains(hit);
+  }).map((o) => o.innerText.split("\n")[0]));
+for (const w of [1280, 400]) {
+  await page.setViewportSize({ width: w, height: 900 });
+  await sleep(300);
+  const bad = await covered();
+  check(`picker ${w}px: ro'yxat boshqa bo'limlar ostida qolmaydi`, bad.length === 0, bad.join(", "));
+  await page.screenshot({ path: `${SHOTS}settings-ai-open-${w}.png` });
+}
 const ad0 = await combo.getAttribute("aria-activedescendant");
 await page.keyboard.press("ArrowDown");
 await page.keyboard.press("ArrowDown");

@@ -7,7 +7,9 @@ import { useI18n } from "@/lib/i18n";
 
 export function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
-    <section className="msg-in mb-8">
+    // msg-in animatsiyasi bo'limni alohida qatlamga (stacking context) aylantiradi: ichidagi ochiluvchi ro'yxat
+    // (masalan model tanlagich) keyingi bo'limlar ostida qolmasligi uchun fokus ichida bo'lsa bo'lim yuqoriga ko'tariladi
+    <section className="msg-in relative mb-8 focus-within:z-20">
       <h2 className="text-base font-semibold">{title}</h2>
       {desc && <p className="mt-0.5 text-sm text-neutral-400">{desc}</p>}
       <div className="mt-3 divide-y divide-neutral-800 rounded-xl border border-neutral-800 bg-neutral-950/40">{children}</div>
