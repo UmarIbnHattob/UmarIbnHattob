@@ -27,6 +27,11 @@ from app.security import login_limiter  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 def schema():
+    # Xavfsizlik: quyida drop_all va TRUNCATE bor — faqat nomi "_test" bilan tugaydigan bazada ishlaymiz,
+    # aks holda (masalan TEST_DATABASE_URL xato berilsa) haqiqiy bazani o'chirib yuborish mumkin
+    if not (engine.url.database or "").endswith("_test"):
+        pytest.exit(f"Testlar faqat '*_test' bazada ishlaydi (hozir: {engine.url.database!r}). TEST_DATABASE_URL ni tekshiring.",
+                    returncode=2)
     # Test bazasi har safar modellardan qayta quriladi: ustun o'zgarsa (masalan migratsiyada) eski sxema qolmasin
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)

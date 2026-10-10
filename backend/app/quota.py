@@ -1,8 +1,10 @@
 """Qaysi API kalit ishlatilishini aniqlash: foydalanuvchining o'zi yoki platforma kaliti (oylik limit bilan).
 
 Platforma kaliti ishlatilsa, oylik limitdan bitta so'rov so'rov BOSHLANISHIDAN OLDIN atomar band qilinadi
-(`reserve`) va so'rov muvaffaqiyatsiz tugasa (xato, bo'sh javob, bekor qilish) qaytariladi (`refund`).
-Shunda bir vaqtdagi so'rovlar ham limitdan oshmaydi, xato so'rovlar esa limitni yemaydi.
+(`reserve`). U faqat so'rov provayderda bajarilmagan bo'lsa qaytariladi (`refund`): provayder xatosi (HTTP xato,
+ulanish yo'q) birinchi so'zdan oldin yoki so'rov provayderga yetmasdan rad etilgan bo'lsa. Bekor qilish va bo'sh
+(200) javob qaytarilmaydi — provayder so'rovni allaqachon hisoblagan (aks holda limitni chetlab o'tish mumkin).
+Shunda bir vaqtdagi so'rovlar ham limitdan oshmaydi, bajarilmagan so'rovlar esa limitni yemaydi.
 """
 import logging
 import uuid
@@ -18,6 +20,7 @@ from app.config import settings
 from app.crypto import decrypt
 from app.database import SessionLocal
 from app.models import ApiKey, Provider, UsageCounter, User
+from app.providers.base import EmptyReply
 
 log = logging.getLogger(__name__)
 
@@ -92,10 +95,16 @@ def refund(user_id: uuid.UUID) -> None:
 
 @contextmanager
 def refund_on_error(user_id: uuid.UUID, platform: bool) -> Iterator[None]:
-    """Blok ichida xato (yoki bekor qilish) bo'lsa, platforma limitidan olingan so'rovni qaytaradi."""
+    """Blok ichida xato bo'lsa, platforma limitidan olingan so'rovni qaytaradi.
+
+    Bekor qilish (CancelledError — BaseException) va EmptyReply (provayder javob berdi, lekin natija yo'q)
+    qaytarilmaydi: provayder so'rovni hisoblagan.
+    """
     try:
         yield
-    except BaseException:
+    except EmptyReply:
+        raise
+    except Exception:
         if platform:
             refund(user_id)
         raise

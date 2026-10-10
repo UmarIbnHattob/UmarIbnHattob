@@ -4,7 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -51,14 +51,21 @@ def image_models():
 def list_media(
     limit: int = Query(60, ge=1, le=200),
     before: datetime | None = None,
+    before_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Eng yangisidan boshlab. Keyingi sahifa: ?before=<oxirgi elementning created_at>."""
+    """Eng yangisidan boshlab. Keyingi sahifa: ?before=<oxirgi elementning created_at>&before_id=<uning id si>."""
     # `data` ustunini yuklamaymiz: ro'yxat tez bo'lishi uchun
     stmt = select(MediaItem).where(MediaItem.user_id == user.id)
     if before is not None:
-        stmt = stmt.where(MediaItem.created_at < before)
+        if before_id is not None:
+            # (vaqt, id) juftligi bo'yicha: vaqti bir xil rasmlar sahifa chegarasida tushib qolmaydi
+            stmt = stmt.where(tuple_(MediaItem.created_at, MediaItem.id) < tuple_(before, before_id))
+        else:  # eski mijozlar: faqat vaqt bo'yicha
+            stmt = stmt.where(MediaItem.created_at < before)
+    elif before_id is not None:
+        raise HTTPException(422, "before_id faqat before bilan birga ishlatiladi.")
     rows = db.scalars(stmt.order_by(MediaItem.created_at.desc(), MediaItem.id.desc()).limit(limit))
     return [_out(m) for m in rows]
 
@@ -72,12 +79,13 @@ async def create_image(body: ImageIn, db: Session = Depends(get_db), user: User 
     # Rasm yaratish 1-2 daqiqa olishi mumkin: shu vaqtda baza ulanishini band qilib turmaymiz
     user_id = user.id
     db.close()
-    # Rasm chiqmasa (xato, rad etildi) bepul limit qaytariladi va statistikaga yozilmaydi
-    with refund_on_error(user_id, platform):
-        try:
+    # Provayder xatosida bepul limit qaytariladi; model javob berib, rasm chiqmasa (rad etildi) qaytarilmaydi.
+    # Ikkalasida ham statistikaga yozilmaydi.
+    try:
+        with refund_on_error(user_id, platform):
             mime, data = await gemini_image.generate_image(api_key, body.model, body.prompt)
-        except ProviderError as exc:
-            raise HTTPException(502, str(exc))
+    except ProviderError as exc:
+        raise HTTPException(502, str(exc))
     record(user_id, "image", "gemini", body.model, platform)
 
     item = MediaItem(user_id=user_id, prompt=body.prompt, model=body.model, mime_type=mime, data=data)

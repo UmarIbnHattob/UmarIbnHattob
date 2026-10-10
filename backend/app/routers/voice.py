@@ -1,6 +1,7 @@
 """Ovozli xabar -> matn (Gemini audio tushunish orqali, zaxira: Whisper). O'zbek, rus va ingliz tillari."""
 import base64
 import binascii
+import uuid
 from collections.abc import Callable
 
 import httpx
@@ -15,7 +16,7 @@ from app.crypto import decrypt
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import CustomProvider, Provider, User
-from app.netguard import UnsafeURL, check_url
+from app.netguard import UnsafeURL, check_url_async
 from app.providers import openai_compat
 from app.providers.base import ProviderError, friendly_http_error
 from app.quota import key_for, refund, reserve
@@ -41,6 +42,11 @@ FALLBACK_STATUSES = {401, 403, 429}
 
 def _can_fall_back(status: int | None) -> bool:
     return status is None or status in FALLBACK_STATUSES or status >= 500
+
+
+def _key_invalid(status: int, body: str) -> bool:
+    """Gemini noto'g'ri yoki muddati o'tgan kalitga 401 emas, 400 qaytaradi (reason: API_KEY_INVALID)."""
+    return status == 400 and any(s in body for s in ("API_KEY_INVALID", "API key not valid", "API key expired"))
 
 
 def _is_mp3(b: bytes) -> bool:
@@ -77,7 +83,9 @@ async def _gemini(api_key: str, mime: str, audio_b64: str) -> str:
     except httpx.HTTPError:
         raise _GeminiFailed(None, "Ovozni matnga aylantirish xizmatiga ulanib bo'lmadi.")
     if r.status_code != 200:
-        raise _GeminiFailed(r.status_code, str(friendly_http_error(r.status_code, r.text)))
+        # Noto'g'ri kalit (400 API_KEY_INVALID) 401 kabi ko'riladi: tushunarli xabar va Whisper'ga o'tish
+        status = 401 if _key_invalid(r.status_code, r.text) else r.status_code
+        raise _GeminiFailed(status, str(friendly_http_error(status, r.text)))
     parts = ((r.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
     return "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
 
@@ -105,56 +113,63 @@ async def transcribe(body: VoiceIn, db: Session = Depends(get_db), user: User = 
     if not looks_ok(raw):
         raise HTTPException(400, f"Audio {ext.upper()} formatida emas.")
 
-    # 1) Gemini (o'z kaliti yoki platforma limiti); 2) o'z kaliti ishlamasa yoki limit tugagan bo'lsa — Whisper
-    # (Groq / OpenAI provayderi)
+    # 1) Gemini (o'z kaliti yoki platforma limiti); 2) Gemini ishlatib bo'lmasa (kalit yo'q, limit tugagan, o'z kaliti
+    # ishlamadi) — Whisper (Groq / OpenAI provayderi). Whisper provayderi faqat shunda qidiriladi.
     user_id = user.id
-    whisper = _whisper_provider(db, user)
     try:
         api_key, platform = key_for(db, user, Provider.gemini)
     except HTTPException:
         api_key, platform = None, False
+    quota_out = False
     if api_key and platform:
         try:
             reserve(db, user)
         except HTTPException:
-            if whisper is None:
+            api_key, quota_out = None, True
+
+    if api_key is None:
+        whisper = await _whisper_provider(db, user_id)
+        db.close()
+        if whisper is None:
+            if quota_out:
                 raise HTTPException(
                     429,
                     f"Bu oy uchun bepul limit ({settings.free_monthly_requests} so'rov) tugadi. Ovoz uchun o'z Gemini "
                     "kalitingizni (bepul: aistudio.google.com) yoki Groq provayderini qo'shing.",
                 )
-            api_key = None
-    db.close()
-
-    if api_key is None:
-        if whisper is None:
             raise HTTPException(400, NEED_KEY)
         return await _whisper(user_id, whisper, raw, ext, body.mime)
 
+    db.close()  # Gemini javobini kutish davomida baza ulanishini band qilmaymiz
     try:
         text = await _gemini(api_key, body.mime, body.audio)
-    except BaseException as exc:
+    except _GeminiFailed as exc:
+        # So'rov Gemini'da bajarilmadi (HTTP xato yoki ulanish yo'q): bepul limit qaytariladi.
+        # Bekor qilish va kutilmagan xatoda qaytarilmaydi (so'rov hisoblangan bo'lishi mumkin).
         if platform:
             refund(user_id)
-        if isinstance(exc, _GeminiFailed):
-            if whisper is not None and _can_fall_back(exc.status):
-                return await _whisper(user_id, whisper, raw, ext, body.mime)
-            raise HTTPException(502, str(exc))
-        raise
+        whisper = await _whisper_provider(db, user_id) if _can_fall_back(exc.status) else None
+        db.close()
+        if whisper is not None:
+            return await _whisper(user_id, whisper, raw, ext, body.mime)
+        raise HTTPException(502, str(exc))
     record(user_id, "voice", "gemini", TRANSCRIBE_MODEL, platform)
     return {"text": text}
 
 
-def _whisper_provider(db: Session, user: User) -> tuple[str, str | None, str] | None:
+async def _whisper_provider(db: Session, user_id: uuid.UUID) -> tuple[str, str | None, str] | None:
     """Whisper qo'llaydigan birinchi provayder (Groq/OpenAI): (base_url, key, model)."""
-    for cp in db.scalars(select(CustomProvider).where(CustomProvider.user_id == user.id).order_by(CustomProvider.created_at)):
+    rows = db.scalars(
+        select(CustomProvider).where(CustomProvider.user_id == user_id).order_by(CustomProvider.created_at)
+    ).all()
+    for cp in rows:
         model = preset_stt(cp)
         if not model:
             continue
-        if not settings.allow_local_providers:
-            try:
-                check_url(cp.base_url)  # DNS rebinding: manzil ichki tarmoqqa o'zgarmagan bo'lsin
-            except UnsafeURL:
-                continue
+        try:
+            # Manzil ichki tarmoqqa o'zgarmagan bo'lsin (DNS alohida oqimda; ulanishda ham tekshiriladi)
+            await check_url_async(cp.base_url)
+        except UnsafeURL:
+            continue
         return cp.base_url, decrypt(cp.encrypted_key) if cp.encrypted_key else None, model
     return None

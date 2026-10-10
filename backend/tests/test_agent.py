@@ -169,14 +169,42 @@ def test_agent_failure_refunds_and_success_records(client, monkeypatch):
 
 def test_agent_image_failure_refunds(client, monkeypatch):
     from app.providers import gemini_image
-    from app.providers.base import ProviderError
+    from app.providers.base import EmptyReply, ProviderError
     _platform_gemini(monkeypatch)
 
     async def fail(api_key, model, prompt):
-        raise ProviderError("Model rasm qaytarmadi.")
+        raise ProviderError("Gemini serverida xato (500).")
     monkeypatch.setattr(gemini_image, "generate_image", fail)
     assert client.post("/api/agent/image", json={"prompt": "logo"}).status_code == 502
     assert client.get("/api/usage").json()["used"] == 0
+
+    async def refused(api_key, model, prompt):  # 200, lekin rasm yo'q: so'rov hisoblangan
+        raise EmptyReply("Model rasm qaytarmadi.")
+    monkeypatch.setattr(gemini_image, "generate_image", refused)
+    assert client.post("/api/agent/image", json={"prompt": "logo"}).status_code == 502
+    assert client.get("/api/usage").json()["used"] == 1
+
+
+def test_agent_expert_empty_answer_keeps_quota(client, monkeypatch):
+    from app.models import Provider
+    from app.providers.base import ProviderError
+    from app.providers.registry import STREAMERS
+    _platform_gemini(monkeypatch)
+
+    async def fail(api_key, model, messages, system=None):
+        raise ProviderError("Gemini serverida xato (500).")
+        yield  # pragma: no cover
+    monkeypatch.setitem(STREAMERS, Provider.gemini, fail)
+    body = {"question": "kodni tekshir", "expertise": "code"}
+    assert client.post("/api/agent/expert", json=body).status_code == 502
+    assert client.get("/api/usage").json()["used"] == 0
+
+    async def empty(api_key, model, messages, system=None):
+        yield "  "
+    monkeypatch.setitem(STREAMERS, Provider.gemini, empty)
+    r = client.post("/api/agent/expert", json=body)
+    assert r.status_code == 502 and "bo'sh" in r.json()["detail"]
+    assert client.get("/api/usage").json()["used"] == 1  # provayder javob berdi: limit qaytarilmaydi
 
 
 def test_custom_model_without_tools_rejected_and_auto_falls_back_to_tools_model(client, monkeypatch):

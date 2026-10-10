@@ -1,8 +1,10 @@
 """Chat navbati chekka holatlari: xato/bo'sh javob/bekor qilish, saqlash xatosi, bepul limit, ro'yxat sahifalari."""
 import asyncio
 import json
+import threading
 import uuid
 
+import anyio
 import httpx
 import pytest
 from sqlalchemy import select, text
@@ -11,7 +13,7 @@ from app.config import settings
 from app.database import SessionLocal, engine
 from app.models import Provider, User
 from app.providers import gemini_image, openai_compat, registry
-from app.providers.base import ProviderError
+from app.providers.base import EmptyReply, ProviderError
 from app.routers import chat
 from app.schemas import SendMessageIn
 from tests.conftest import make_client
@@ -153,8 +155,9 @@ async def test_client_cancel(client, monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert client.get(url).json() == []
-    assert client.get("/api/usage").json()["used"] == 0  # bepul limit qaytarildi
+    assert client.get(url).json() == []  # savol tarixdan olindi
+    # Bekor qilish bepul limitni qaytarmaydi: provayder so'rovni allaqachon hisoblagan
+    assert client.get("/api/usage").json()["used"] == 1
 
     gate.clear()
     it = await _start(cid, "qisman")
@@ -165,7 +168,82 @@ async def test_client_cancel(client, monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert [m["content"] for m in client.get(url).json()] == ["qisman", "Yarim"]
-    assert client.get("/api/usage").json()["used"] == 1
+    assert client.get("/api/usage").json()["used"] == 2
+
+
+@pytest.mark.anyio
+async def test_reply_saved_when_cancelled_while_waiting_for_worker(client, monkeypatch):
+    """Javob tugadi, uni saqlash uchun bo'sh oqim kutilayotganda mijoz uziladi: javob baribir saqlanadi."""
+    client.put("/api/keys/deepseek", json={"key": "key-deepseek-1234"})
+    cid = new_conv(client)
+    url = f"/api/conversations/{cid}/messages"
+
+    async def ok(api_key, model, messages, system=None):
+        yield "To'liq javob"
+    monkeypatch.setitem(registry.STREAMERS, Provider.deepseek, ok)
+
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    tokens, release = limiter.total_tokens, threading.Event()
+    limiter.total_tokens = 1
+    blocker = asyncio.ensure_future(anyio.to_thread.run_sync(release.wait))  # yagona bo'sh oqimni band qiladi
+    try:
+        await asyncio.sleep(0.05)
+        assert limiter.borrowed_tokens == 1
+        it = await _start(cid, "savol")
+        assert json.loads((await it.__anext__())[5:])["text"] == "To'liq javob"
+        task = asyncio.ensure_future(it.__anext__())  # finish() bo'sh oqimni kutmoqda
+        await asyncio.sleep(0.1)
+        assert not task.done()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        await blocker
+        limiter.total_tokens = tokens
+    assert [m["content"] for m in client.get(url).json()] == ["savol", "To'liq javob"]
+
+
+@pytest.mark.anyio
+async def test_finish_runs_once_when_cancelled_during_save(client, monkeypatch):
+    """Saqlash oqimda boshlangan paytda bekor qilinsa: finally ikkinchi marta saqlamaydi, javob bitta."""
+    client.put("/api/keys/deepseek", json={"key": "key-deepseek-1234"})
+    cid = new_conv(client)
+    url = f"/api/conversations/{cid}/messages"
+
+    async def ok(api_key, model, messages, system=None):
+        yield "javob"
+    monkeypatch.setitem(registry.STREAMERS, Provider.deepseek, ok)
+    entered, release, calls = threading.Event(), threading.Event(), []
+    real_record = chat.record
+
+    def slow_record(*args):
+        calls.append(args)
+        entered.set()
+        release.wait(5)
+        real_record(*args)
+    monkeypatch.setattr(chat, "record", slow_record)
+
+    it = await _start(cid, "savol")
+    await it.__anext__()
+    task = asyncio.ensure_future(it.__anext__())
+    await anyio.to_thread.run_sync(entered.wait, 5)
+    timer = threading.Timer(0.3, release.set)  # bekor qilish oqim tugashini kutsa ham test osilib qolmasin
+    timer.start()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    for _ in range(50):  # oqimdagi finish() tugashini kutamiz
+        msgs = client.get(url).json()
+        if len(msgs) == 2:
+            break
+        await asyncio.sleep(0.1)
+    timer.join()
+    await asyncio.sleep(0.2)
+    assert [(m["role"], m["content"]) for m in client.get(url).json()] == [("user", "savol"), ("assistant", "javob")]
+    assert len(calls) == 1
 
 
 def test_platform_quota_and_usage_only_for_successful_replies(client, monkeypatch):
@@ -187,11 +265,21 @@ def test_platform_quota_and_usage_only_for_successful_replies(client, monkeypatc
     assert client.post(url, json={"content": "x", "model": "deepseek-chat", "image": png}).status_code == 400
     assert client.get("/api/usage").json()["used"] == 0
 
+    # Bo'sh 200 javob: savol olinadi, lekin limit qaytarilmaydi (provayder so'rovni hisoblagan)
+    async def empty(api_key, model, messages, system=None):
+        return
+        yield  # pragma: no cover
+    monkeypatch.setitem(registry.STREAMERS, Provider.deepseek, empty)
+    ev = events(client.post(url, json={"content": "x", "model": "deepseek-chat"}))
+    assert ev[-1]["type"] == "error" and ev[-1]["user_message_removed"] is True
+    assert client.get("/api/usage").json()["used"] == 1
+    assert client.get("/api/usage/stats").json()["by_kind"] == {}
+
     async def ok(api_key, model, messages, system=None):
         yield "javob"
     monkeypatch.setitem(registry.STREAMERS, Provider.deepseek, ok)
     assert events(client.post(url, json={"content": "x", "model": "deepseek-chat"}))[-1]["type"] == "done"
-    assert client.get("/api/usage").json()["used"] == 1
+    assert client.get("/api/usage").json()["used"] == 2
     assert client.get("/api/usage/stats").json()["by_model"] == [{"model": "deepseek-chat", "count": 1}]
 
 
@@ -207,6 +295,14 @@ def test_auto_image_failure_refunds_and_alt_text_is_safe(client, monkeypatch):
     assert ev[0]["type"] == "route" and ev[0]["kind"] == "image" and ev[-1]["user_message_removed"] is True
     assert client.get("/api/usage").json()["used"] == 0
 
+    # Model javob berdi, lekin rasm chiqmadi (rad etdi): limit qaytarilmaydi
+    async def no_image(api_key, model, prompt):
+        raise EmptyReply("Model rasm qaytarmadi (SAFETY).")
+    monkeypatch.setattr(gemini_image, "generate_image", no_image)
+    ev = events(client.post(url, json={"content": "logo chizib ber", "model": "auto"}))
+    assert ev[-1]["user_message_removed"] is True and "SAFETY" in ev[-1]["message"]
+    assert client.get("/api/usage").json()["used"] == 1
+
     async def ok(api_key, model, prompt):
         return "image/png", b"\x89PNG\r\n\x1a\n" + b"0" * 20
     monkeypatch.setattr(gemini_image, "generate_image", ok)
@@ -216,7 +312,7 @@ def test_auto_image_failure_refunds_and_alt_text_is_safe(client, monkeypatch):
     alt = md[2:md.index("](omni-media://")]
     assert md.startswith("![") and md.endswith(")") and len(alt) <= 80
     assert not any(ch in alt for ch in "[]\\`<>\n")
-    assert client.get("/api/usage").json()["used"] == 1
+    assert client.get("/api/usage").json()["used"] == 2
     assert client.get("/api/usage/stats").json()["by_kind"] == {"image": 1}
 
 
@@ -296,3 +392,24 @@ def test_conversations_pagination_search_and_rename(client):
     other = make_client("vali@example.com")
     assert other.patch(f"/api/conversations/{ids[0]}", json={"title": "o'g'ri"}).status_code == 404
     assert other.get("/api/conversations", params={"q": "Suhbat"}).json() == []
+
+
+def test_conversation_cursor_with_equal_timestamps_and_default_limit(client):
+    """Bir xil updated_at li suhbatlar sahifa chegarasida tushib qolmaydi; standart limit 100."""
+    uid = client.get("/api/auth/me").json()["id"]
+    with engine.begin() as c:
+        c.execute(text("INSERT INTO conversations (id, user_id, title, updated_at) "
+                       "SELECT gen_random_uuid(), :u, 'c' || g, timestamptz '2026-01-01 00:00:00+00' "
+                       "FROM generate_series(1, 120) g"), {"u": uid})
+    assert len(client.get("/api/conversations").json()) == 100
+    seen, params = [], {"limit": 50}
+    while True:
+        page = client.get("/api/conversations", params=params).json()
+        seen += [c["id"] for c in page]
+        if len(page) < 50:
+            break
+        params = {"limit": 50, "before": page[-1]["updated_at"], "before_id": page[-1]["id"]}
+    assert len(seen) == 120 and len(set(seen)) == 120
+    # Eski mijoz (faqat before): vaqt bo'yicha qat'iy kichik — ishlashda davom etadi
+    assert client.get("/api/conversations", params={"before": "2026-01-01T00:00:01+00:00"}).json()[0]["id"] == seen[0]
+    assert client.get("/api/conversations", params={"before_id": seen[0]}).status_code == 422

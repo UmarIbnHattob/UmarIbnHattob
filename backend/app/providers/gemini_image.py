@@ -3,7 +3,7 @@ import base64
 
 import httpx
 
-from app.providers.base import ProviderError, friendly_http_error
+from app.providers.base import EmptyReply, ProviderError, friendly_http_error
 
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # Rasm yaratish matn javobidan sekinroq: o'qish uchun 2 daqiqagacha kutamiz
@@ -38,4 +38,4 @@ async def generate_image(api_key: str, model: str, prompt: str) -> tuple[str, by
             if part.get("text"):
                 texts.append(part["text"])
     reason = (texts[0][:200] if texts else data.get("promptFeedback", {}).get("blockReason")) or "sabab noma'lum"
-    raise ProviderError(f"Model rasm qaytarmadi ({reason}). So'rovni o'zgartirib ko'ring.")
+    raise EmptyReply(f"Model rasm qaytarmadi ({reason}). So'rovni o'zgartirib ko'ring.")

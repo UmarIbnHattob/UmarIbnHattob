@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from app.netguard import http_client
 from app.providers.base import (
     FILTERED_NOTE,
     INTERRUPTED_NOTE,
@@ -21,6 +22,15 @@ from app.providers.base import (
 )
 
 AGENT_TIMEOUT = httpx.Timeout(connect=10, read=300, write=60, pool=10)
+# O'rnatilgan Deepseek manzili o'zgarmas (foydalanuvchi bermaydi): ulanish paytidagi SSRF tekshiruvi kerak emas
+DEEPSEEK_BASE = "https://api.deepseek.com"
+
+
+def _client(base_url: str, timeout: httpx.Timeout) -> httpx.AsyncClient:
+    """Foydalanuvchi bergan manzil uchun himoyalangan mijoz (netguard.http_client), o'rnatilgan Deepseek uchun oddiy."""
+    return httpx.AsyncClient(timeout=timeout) if base_url == DEEPSEEK_BASE else http_client(timeout)
+
+
 # OpenRouter ilovani taniy olishi uchun (ixtiyoriy sarlavhalar)
 EXTRA_HEADERS = {"HTTP-Referer": "https://omniai.uz", "X-Title": "OmniAI Workspace"}
 
@@ -91,7 +101,7 @@ async def stream_chat(
     }
     refusal: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        async with _client(base_url, TIMEOUT) as client:
             async with client.stream("POST", f"{base_url.rstrip('/')}/chat/completions", headers=_headers(api_key), json=body) as r:
                 if r.status_code != 200:
                     raise friendly_http_error(r.status_code, (await r.aread()).decode(errors="ignore"))
@@ -152,7 +162,7 @@ async def step(base_url: str, api_key: str | None, model: str, system: str, mess
         ],
     }
     try:
-        async with httpx.AsyncClient(timeout=AGENT_TIMEOUT) as client:
+        async with _client(base_url, AGENT_TIMEOUT) as client:
             r = await client.post(f"{base_url.rstrip('/')}/chat/completions", headers=_headers(api_key), json=body)
     except httpx.TimeoutException:
         raise ProviderError(f"{label} javob bermadi (vaqt tugadi).")
@@ -196,7 +206,7 @@ async def complete(base_url: str, api_key: str | None, model: str, system: str |
 async def list_models(base_url: str, api_key: str | None) -> list[dict]:
     """GET /models — OpenAI formatidagi model ro'yxati. OpenRouter qo'shimcha maydonlarini ham o'qiydi."""
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(20)) as client:
+        async with _client(base_url, httpx.Timeout(20)) as client:
             r = await client.get(f"{base_url.rstrip('/')}/models", headers=_headers(api_key))
     except httpx.HTTPError as exc:
         raise ProviderError(f"Model ro'yxatini olib bo'lmadi: {exc.__class__.__name__}. Manzil va kalitni tekshiring.")
@@ -244,7 +254,7 @@ async def transcribe(base_url: str, api_key: str | None, model: str, audio: byte
                      filename: str = "voice.wav", mime: str = "audio/wav") -> str:
     """Whisper (OpenAI/Groq) — ovozni matnga."""
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=90, write=60, pool=10)) as client:
+        async with _client(base_url, httpx.Timeout(connect=10, read=90, write=60, pool=10)) as client:
             r = await client.post(
                 f"{base_url.rstrip('/')}/audio/transcriptions",
                 headers=_headers(api_key),
@@ -325,7 +335,7 @@ async def _stream_responses(base_url, api_key, model, messages, system, label) -
     if system:
         body["instructions"] = system
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        async with _client(base_url, TIMEOUT) as client:
             async with client.stream("POST", f"{base_url.rstrip('/')}/responses", headers=_headers(api_key), json=body) as r:
                 if r.status_code != 200:
                     raise friendly_http_error(r.status_code, (await r.aread()).decode(errors="ignore"))
@@ -386,7 +396,7 @@ async def _step_responses(base_url, api_key, model, system, messages, tools, lab
         "tools": [{"type": "function", "name": t["name"], "description": t["description"], "parameters": t["schema"]} for t in tools],
     }
     try:
-        async with httpx.AsyncClient(timeout=AGENT_TIMEOUT) as client:
+        async with _client(base_url, AGENT_TIMEOUT) as client:
             r = await client.post(f"{base_url.rstrip('/')}/responses", headers=_headers(api_key), json=body)
     except httpx.TimeoutException:
         raise ProviderError(f"{label} javob bermadi (vaqt tugadi).")

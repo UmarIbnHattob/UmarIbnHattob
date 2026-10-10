@@ -54,6 +54,13 @@ IMAGE = [
     "Сгенерируй, пожалуйста, красивую картинку с горами",
     "Создай логотип для кофейни",
     "Изобрази закат над морем",
+    # jadval/grafik so'zi bor, lekin chizilayotgan narsa boshqa (stol, uslub)
+    "draw a cat sitting on a table",
+    "Draw a dog under the table",
+    "draw a picture of a graph",
+    "mushukni stol ustida chizib ber, grafik uslubda",
+    "grafik uslubda mushuk chizib ber",
+    "Нарисуй кота, который сидит на столе",
 ]
 GENERAL = [
     "salom, qalaysan?",
@@ -66,6 +73,12 @@ GENERAL = [
     "Menga yangi planshet tanlashda yordam ber, qaysi biri yaxshi va arzon?",  # "planshet" — "plan" emas
     "Jadval chizib ber: oylar va daromad",
     "Draw a table comparing cats and dogs",
+    # jadval/grafikning o'zi chiziladi — matn bilan javob
+    "Sotuvlar grafigini chizib ber",
+    "jadval ko'rinishida chizib ber",
+    "Draw me a bar chart of monthly sales",
+    "Нарисуй таблицу умножения",
+    "нарисуй мне круговую диаграмму расходов",
     "Write a poem about drawing",
     "Chiziqli tenglama nima?",
     "Botir qayerda?",
